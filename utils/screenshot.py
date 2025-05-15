@@ -1,6 +1,8 @@
 import asyncio
 from playwright.async_api import async_playwright
 
+from utils.logger_util import logger
+
 async def capture_steam_profile(url: str) -> str | None:
     try:
         async with async_playwright() as p:
@@ -14,5 +16,5 @@ async def capture_steam_profile(url: str) -> str | None:
             await browser.close()
             return path
     except Exception as e:
-        print("Ошибка при создании скриншота:", e)
+        logger("Error while creating screenshot:", e)
         return None
