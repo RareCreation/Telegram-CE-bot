@@ -1,5 +1,5 @@
 import asyncio
-from aiogram import F, types
+from aiogram import F
 from aiogram.filters import Command
 from aiogram.types import Message, FSInputFile
 from handlers.bot_instance import dp, bot
@@ -17,14 +17,12 @@ SCREENSHOTS_DIR = "screenshots"
 if not os.path.exists(SCREENSHOTS_DIR):
     os.makedirs(SCREENSHOTS_DIR)
 
-
 async def take_screenshot(url: str, filename: str):
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
-
     driver = webdriver.Chrome(
         service=Service(ChromeDriverManager().install()),
         options=chrome_options
@@ -35,52 +33,39 @@ async def take_screenshot(url: str, filename: str):
         await asyncio.sleep(5)
         driver.save_screenshot(filename)
 
-     
         img = Image.open(filename)
         width, height = img.size
         cropped_img = img.crop((0, 105, width, height))
 
-
         enhancer = ImageEnhance.Brightness(cropped_img)
         darkened_img = enhancer.enhance(0.6)
-
 
         try:
 
             friend_img = Image.open("images/friend.png").convert("RGBA")
 
-
             main_width, main_height = darkened_img.size
             friend_width, friend_height = friend_img.size
-
 
             position = (
                 (main_width - friend_width) // 2,
                 (main_height - friend_height) // 2
             )
 
-
             darkened_img_rgba = darkened_img.convert("RGBA")
-
 
             darkened_img_rgba.alpha_composite(friend_img, dest=position)
 
-
             darkened_img_rgba.convert("RGB").save(filename)
-
         except Exception as e:
             logger(f"Error overlaying friend image: {str(e)}")
-
             darkened_img.save(filename)
-
     finally:
         driver.quit()
-
 
 @dp.message(Command("start"))
 async def start_handler(message: Message):
     await message.answer("Отправь мне ссылку на Steam профиль.")
-
 
 @dp.message(F.text.contains("steamcommunity.com"))
 async def process_steam_link(message: Message):
