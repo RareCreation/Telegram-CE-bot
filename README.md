@@ -33,7 +33,7 @@ This repository contains a Telegram bot built using `aiogram`.
    pip install -r requirements.txt
    ```
 
-4. Create a `.env` file in the root directory and add your bot token:
+4. Create a `.env` file in the data folder and add your bot token:
    ```
    TOKEN=your-telegram-bot-token
    ```
