@@ -51,3 +51,27 @@ def process_qr_image(img, padding=5):
     y_end = min(y + h + padding, img.shape[0])
     qr_img = img[y_start:y_end, x_start:x_end]
     return img, qr_img
+
+
+def process_qr_image2(img, padding=10):
+    qr_codes = decode(img)
+    if not qr_codes:
+        return None, None
+    qr = qr_codes[0]
+    x, y, w, h = qr.rect
+    x_start = max(x - padding, 0)
+    y_start = max(y - padding, 0)
+    x_end = min(x + w + padding, img.shape[1])
+    y_end = min(y + h + padding, img.shape[0])
+    qr_img = img[y_start:y_end, x_start:x_end]
+
+    qr_rgba = cv2.cvtColor(qr_img, cv2.COLOR_BGR2BGRA)
+
+    white_thresh = 240
+    mask = cv2.inRange(qr_img, (white_thresh, white_thresh, white_thresh), (255, 255, 255))
+    qr_rgba[mask == 255] = [0, 0, 0, 0]
+
+    return img, qr_rgba
+
+
+
