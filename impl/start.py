@@ -210,31 +210,43 @@ async def handle_qr_code_photo(message: Message, state: FSMContext):
     np_img = np.frombuffer(file_bytes.read(), np.uint8)
     img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
 
-    processed_img, qr_img = process_qr_image(img)
+    processed_img, qr_img = process_qr_image2(img)
     if processed_img is None:
-        await message.reply("QR код не найден.")
         return
 
-    base_img_path = os.path.join("images", "background.png")
+    def overlay_image_alpha(background, overlay, x, y):
+        b_h, b_w = background.shape[:2]
+        o_h, o_w = overlay.shape[:2]
+        if x + o_w > b_w or y + o_h > b_h:
+            return
+        alpha = overlay[:, :, 3] / 255.0
+        for c in range(3):
+            background[y:y + o_h, x:x + o_w, c] = (
+                    alpha * overlay[:, :, c] + (1 - alpha) * background[y:y + o_h, x:x + o_w, c]
+            ).astype(np.uint8)
+
+    base_img_path = os.path.join("images", "background_first.png")
     base_img = cv2.imread(base_img_path)
     if base_img is None:
-        logger("Failed to load base image")
         return
+    if base_img.shape[2] == 4:
+        base_img = cv2.cvtColor(base_img, cv2.COLOR_BGRA2BGR)
 
-    qr_with_noise = add_noise_to_center_area(qr_img, sigma=50, area_ratio=0.9)
-    qr_with_noise = darken_image(qr_with_noise, factor=0.98)
-    rotated_qr = rotate_image_with_transparency(qr_with_noise, -2)
-    resized_qr = cv2.resize(rotated_qr, (252, 252))
-    resized_qr_bgr = cv2.cvtColor(resized_qr, cv2.COLOR_BGRA2BGR)
-    x_offset, y_offset = 698, 463
-    h, w = resized_qr_bgr.shape[:2]
-    base_img[y_offset:y_offset + h, x_offset:x_offset + w] = resized_qr_bgr
+    rotated_qr = rotate_image_with_transparency(qr_img, -1.4)
+    resized_qr = cv2.resize(rotated_qr, (230, 230))
+
+    x_offset, y_offset = 703, 466
+    overlay_image_alpha(base_img, resized_qr, x_offset, y_offset)
+
     _, buffer_main = cv2.imencode('.png', base_img)
     main_output = BufferedInputFile(BytesIO(buffer_main.tobytes()).getvalue(), filename="result.png")
     await message.answer_photo(photo=main_output)
+
     _, buffer_qr = cv2.imencode('.png', qr_img)
+
     qr_output = BufferedInputFile(BytesIO(buffer_qr.tobytes()).getvalue(), filename="qr_only.png")
     await message.answer_document(document=qr_output)
+
     await state.clear()
 
 @dp.message(QrCodeEState.waiting_for_photo)
