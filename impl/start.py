@@ -245,7 +245,6 @@ async def handle_qr_code_photo(message: Message, state: FSMContext):
     _, buffer_qr = cv2.imencode('.png', qr_img)
 
     qr_output = BufferedInputFile(BytesIO(buffer_qr.tobytes()).getvalue(), filename="qr_only.png")
-    await message.answer_document(document=qr_output)
 
     await state.clear()
 
@@ -293,6 +292,6 @@ async def handle_qr_code_e_photo(message: Message, state: FSMContext):
     _, buffer_qr = cv2.imencode('.png', qr_img)
 
     qr_output = BufferedInputFile(BytesIO(buffer_qr.tobytes()).getvalue(), filename="qr_only.png")
-    await message.answer_document(document=qr_output)
+
 
     await state.clear()
