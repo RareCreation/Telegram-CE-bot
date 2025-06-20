@@ -1,15 +1,21 @@
 import os
+import re
 import uuid
 from io import BytesIO
-
+import sqlite3
+from typing import Dict, Tuple
+import asyncio
 import cv2
 import numpy as np
+import requests
 from PIL import Image, ImageDraw, ImageFont
 from aiogram import F
 from aiogram.filters import Command
 from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from bs4 import BeautifulSoup
+
 from utils.screenshot import take_screenshot, take_screenshot_second
 from handlers.bot_instance import bot, dp
 from utils.logger_util import logger
@@ -33,6 +39,10 @@ class QrCodeState(StatesGroup):
 class QrCodeEState(StatesGroup):
     waiting_for_photo = State()
 
+class OnlineCheckState(StatesGroup):
+    waiting_for_profile_link = State()
+    waiting_for_comment = State()
+
 @dp.message(Command("start"))
 async def start_handler(message: Message, state: FSMContext):
     await message.answer(
@@ -42,11 +52,188 @@ async def start_handler(message: Message, state: FSMContext):
                 [InlineKeyboardButton(text="🫂 Add Friend", callback_data="add_friend")],
                 [InlineKeyboardButton(text="⚠️ Ban MM", callback_data="ban_mm")],
                 [InlineKeyboardButton(text="🔷 QR PWA", callback_data="qr_code")],
-                [InlineKeyboardButton(text="🔷 5e QR-code", callback_data="qr_code_e")]
+                [InlineKeyboardButton(text="🔷 5e QR-code", callback_data="qr_code_e")],
+                [InlineKeyboardButton(text="🟢 Check-online", callback_data="online_status")]
             ]
         )
     )
     await state.clear()
+
+
+def init_db():
+    conn = sqlite3.connect('tracking.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS tracking (
+        tg_id INTEGER,
+        steam_id TEXT,
+        comment TEXT,
+        last_status TEXT,
+        PRIMARY KEY (tg_id, steam_id)
+    )
+    ''')
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+
+tracking_tasks: Dict[Tuple[int, str], asyncio.Task] = {}
+
+async def check_status(tg_id: int, steam_id: str, comment: str):
+    url = f"https://steamcommunity.com/profiles/{steam_id}/"
+    last_status = None
+
+    while True:
+        try:
+            conn = sqlite3.connect('tracking.db')
+            cursor = conn.cursor()
+
+            cursor.execute('SELECT 1 FROM tracking WHERE tg_id = ? AND steam_id = ?', (tg_id, steam_id))
+            if not cursor.fetchone():
+                break
+
+            headers = {"User-Agent": "Mozilla/5.0"}
+            response = requests.get(url, headers=headers)
+            soup = BeautifulSoup(response.text, "html.parser")
+
+            persona_name_element = soup.find("span", class_="actual_persona_name")
+            persona_name = persona_name_element.text.strip() if persona_name_element else "Неизвестный пользователь"
+
+            status_element = soup.find("div", class_="profile_in_game_header")
+            current_status = status_element.text.strip() if status_element else "Currently Offline"
+
+            simplified_status = "Currently Online" if "in-game" in current_status.lower() or "online" in current_status.lower() else "Currently Offline"
+
+            cursor.execute('SELECT last_status FROM tracking WHERE tg_id = ? AND steam_id = ?', (tg_id, steam_id))
+            row = cursor.fetchone()
+            db_last_status = row[0] if row else None
+
+            if db_last_status != simplified_status:
+                cursor.execute('UPDATE tracking SET last_status = ? WHERE tg_id = ? AND steam_id = ?',
+                               (simplified_status, tg_id, steam_id))
+                conn.commit()
+
+                if simplified_status == "Currently Online":
+                    message = (
+                        "🟢 Мамонт зашёл в сеть\n\n"
+                        f"🪪 {persona_name}\n"
+                        f"💬 \"{comment}\"\n"
+                        f"📎 {url}"
+                    )
+                else:
+                    message = (
+                        "🔴 Мамонт вышел из сети\n\n"
+                        f"🪪 {persona_name}\n"
+                        f"💬 \"{comment}\"\n"
+                        f"📎 {url}"
+                    )
+
+                await bot.send_message(tg_id, message)
+
+            await asyncio.sleep(30)
+
+        except Exception as e:
+            print(f"[ERROR] Ошибка при проверке статуса: {e}")
+            await asyncio.sleep(60)
+        finally:
+            conn.close()
+
+
+@dp.callback_query(F.data == "online_status")
+async def on_online_status(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_text(
+        "🔍 Чекер статуса\n╰ уведомляет об изменениях статуса мамонта\n\n"
+        "📎 Отправь ссылку на профиль мамонта:\n\n"
+        "❗️Внимание: Если вписать ссылку на профиль который вы уже отслеживаете - бот выключит отслеживание данного участника.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]
+            ]
+        )
+    )
+    await state.set_state(OnlineCheckState.waiting_for_profile_link)
+
+
+@dp.message(OnlineCheckState.waiting_for_profile_link)
+async def handle_online_status_link(message: Message, state: FSMContext):
+    url = message.text.strip()
+    match = re.fullmatch(r"https?://steamcommunity\.com/profiles/(\d{17})/?", url)
+
+    if not match:
+        await message.answer("❌ Ошибка: Неверный формат ссылки. Пример: https://steamcommunity.com/profiles/7656119...")
+        return
+
+    steam_id = match.group(1)
+    tg_id = message.from_user.id
+
+    conn = sqlite3.connect('tracking.db')
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT 1 FROM tracking WHERE tg_id = ? AND steam_id = ?', (tg_id, steam_id))
+    if cursor.fetchone():
+        cursor.execute('DELETE FROM tracking WHERE tg_id = ? AND steam_id = ?', (tg_id, steam_id))
+        conn.commit()
+
+        task_key = (tg_id, steam_id)
+        if task_key in tracking_tasks:
+            tracking_tasks[task_key].cancel()
+            del tracking_tasks[task_key]
+
+        await message.answer(f"❌ Отслеживание профиля {steam_id} остановлено.")
+        await state.clear()
+        return
+
+    cursor.execute('SELECT COUNT(*) FROM tracking WHERE tg_id = ?', (tg_id,))
+    count = cursor.fetchone()[0]
+
+    if count >= 10:
+        await message.answer("❌ Вы достигли лимита отслеживаемых профилей (10).")
+        await state.clear()
+        return
+
+    await state.update_data(steam_id=steam_id, url=url)
+    await message.answer("💬 Напишите комментарий для этого профиля:")
+    await state.set_state(OnlineCheckState.waiting_for_comment)
+
+
+@dp.message(OnlineCheckState.waiting_for_comment)
+async def handle_profile_comment(message: Message, state: FSMContext):
+    comment = message.text.strip()
+    data = await state.get_data()
+    steam_id = data['steam_id']
+    url = data['url']
+    tg_id = message.from_user.id
+
+    conn = sqlite3.connect('tracking.db')
+    cursor = conn.cursor()
+
+    cursor.execute('INSERT INTO tracking (tg_id, steam_id, comment, last_status) VALUES (?, ?, ?, ?)',
+                   (tg_id, steam_id, comment, "Currently Offline"))
+    conn.commit()
+    conn.close()
+
+    task = asyncio.create_task(check_status(tg_id, steam_id, comment))
+    tracking_tasks[(tg_id, steam_id)] = task
+
+    await message.answer(f"✅ Отслеживание профиля начато\n\n"
+                         f"📎 {url}\n"
+                         f"💬 Комментарий: \"{comment}\"")
+    await state.clear()
+
+
+async def restore_tracking_tasks():
+    conn = sqlite3.connect('tracking.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT tg_id, steam_id, comment FROM tracking')
+    rows = cursor.fetchall()
+    conn.close()
+
+    for tg_id, steam_id, comment in rows:
+        task = asyncio.create_task(check_status(tg_id, steam_id, comment))
+        tracking_tasks[(tg_id, steam_id)] = task
+
 
 @dp.callback_query(F.data == "add_friend")
 async def on_add_friend(callback: CallbackQuery, state: FSMContext):
@@ -60,6 +247,8 @@ async def on_add_friend(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("Выбери действие:", reply_markup=keyboard)
     await state.set_state(LinkState.waiting_for_action)
 
+
+
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: CallbackQuery, state: FSMContext):
     keyboard = InlineKeyboardMarkup(
@@ -67,7 +256,8 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="🫂 Add Friend", callback_data="add_friend")],
             [InlineKeyboardButton(text="⚠️ Ban MM", callback_data="ban_mm")],
             [InlineKeyboardButton(text="🔷 QR PWA", callback_data="qr_code")],
-            [InlineKeyboardButton(text="🔷 5e QR-code", callback_data="qr_code_e")]
+            [InlineKeyboardButton(text="🔷 5e QR-code", callback_data="qr_code_e")],
+            [InlineKeyboardButton(text="🟢 Check-online", callback_data="online_status")]
         ]
     )
     await callback.message.edit_text("Выбери одну из функций отрисовки.", reply_markup=keyboard)
@@ -124,6 +314,7 @@ async def on_ban_mm(callback: CallbackQuery, state: FSMContext):
         ]
     )
     await callback.message.edit_text("Выбери длительность блокировки:", reply_markup=keyboard)
+
 
 @dp.callback_query(F.data.startswith("ban_"))
 async def on_ban_duration_selected(callback: CallbackQuery, state: FSMContext):
