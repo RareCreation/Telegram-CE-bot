@@ -22,6 +22,8 @@ from utils.logger_util import logger
 from utils.qr_image_handler import process_qr_image, add_noise_to_center_area, darken_image, \
     rotate_image_with_transparency, process_qr_image2
 
+photo = FSInputFile("images/banner.png")
+
 SCREENSHOTS_DIR = "screenshots"
 if not os.path.exists(SCREENSHOTS_DIR):
     os.makedirs(SCREENSHOTS_DIR)
@@ -43,10 +45,21 @@ class OnlineCheckState(StatesGroup):
     waiting_for_profile_link = State()
     waiting_for_comment = State()
 
+users = 0
+
 @dp.message(Command("start"))
 async def start_handler(message: Message, state: FSMContext):
-    await message.answer(
-        "Выбери одну из функций отрисовки.",
+    add_user(message.from_user.id)
+    user_count = get_user_count()
+
+    await message.answer_photo(
+        photo=photo,
+        caption=(
+            "🖐Добро пожаловать в лучший отрисовщик для ворка по CN/EU\n\n"
+            "🤝<b>Спасибо что выбрали именно нас!</b>\n\n"
+            f"🥷🏻<b>Число</b> юзеров в данном боте - {user_count} 👤"
+        ),
+        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="🫂 Add Friend", callback_data="add_friend")],
@@ -57,7 +70,9 @@ async def start_handler(message: Message, state: FSMContext):
             ]
         )
     )
+
     await state.clear()
+
 
 
 def init_db():
@@ -75,8 +90,37 @@ def init_db():
     conn.commit()
     conn.close()
 
+def init_users_db():
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS users (
+        tg_id INTEGER PRIMARY KEY
+    )
+    ''')
+    conn.commit()
+    conn.close()
 
 init_db()
+init_users_db()
+
+def add_user(tg_id: int):
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT tg_id FROM users WHERE tg_id = ?', (tg_id,))
+    if cursor.fetchone() is None:
+        cursor.execute('INSERT INTO users (tg_id) VALUES (?)', (tg_id,))
+    conn.commit()
+    conn.close()
+
+def get_user_count() -> int:
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM users')
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
 
 
 tracking_tasks: Dict[Tuple[int, str], asyncio.Task] = {}
@@ -143,15 +187,23 @@ async def check_status(tg_id: int, steam_id: str, comment: str):
 
 @dp.callback_query(F.data == "online_status")
 async def on_online_status(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text(
-        "🔍 Чекер статуса\n╰ уведомляет об изменениях статуса мамонта\n\n"
-        "📎 Отправь ссылку на профиль мамонта:\n\n"
-        "❗️Внимание: Если вписать ссылку на профиль который вы уже отслеживаете - бот выключит отслеживание данного участника.",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]
-            ]
-        )
+    await callback.message.delete()
+    caption = (
+        "> 🔍 Чекер статуса\n"
+        "> ╰ уведомляет об изменениях статуса мамонта\n\n"
+        "📎 *Отправь ссылку на профиль мамонта:*\n\n"
+        "❗️*Внимание:* Если вписать ссылку на профиль, который вы уже отслеживаете \\- "
+        "бот выключит отслеживание данного участника\\."
+    )
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]]
+    )
+    await callback.message.answer_photo(
+        photo,
+        caption=caption,
+        parse_mode="MarkdownV2",
+        reply_markup=keyboard
     )
     await state.set_state(OnlineCheckState.waiting_for_profile_link)
 
@@ -237,6 +289,7 @@ async def restore_tracking_tasks():
 
 @dp.callback_query(F.data == "add_friend")
 async def on_add_friend(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🗒 AF Classic", callback_data="af_classic")],
@@ -244,13 +297,26 @@ async def on_add_friend(callback: CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]
         ]
     )
-    await callback.message.edit_text("Выбери действие:", reply_markup=keyboard)
+    await callback.message.answer_photo(
+        photo,
+        caption=(
+            "> 🗒 *AF Classic*\n"
+            "> ╰ отрисовка ошибки добавления в друзья\n\n"
+            "> ⚡️*AF Quick Link*\n"
+            "> ╰ отрисовка Add Friend через линк мамонта\n\n"
+            "🧠 *Выберите*, какой способ вам нужен"
+        ),
+        parse_mode="MarkdownV2",
+        reply_markup=keyboard)
     await state.set_state(LinkState.waiting_for_action)
 
 
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    user_count = get_user_count()
+
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🫂 Add Friend", callback_data="add_friend")],
@@ -260,7 +326,17 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="🟢 Check-online", callback_data="online_status")]
         ]
     )
-    await callback.message.edit_text("Выбери одну из функций отрисовки.", reply_markup=keyboard)
+
+    await callback.message.answer_photo(
+        photo=photo,
+        caption=(
+            "🖐Добро пожаловать в лучший отрисовщик для ворка по CN/EU\n\n"
+            "🤝<b>Спасибо что выбрали именно нас!</b>\n\n"
+            f"🥷🏻<b>Число</b> юзеров в данном боте - {user_count} 👤"
+        ),
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
     await state.clear()
 
 @dp.callback_query(F.data.in_({"af_classic", "af_quick"}))
@@ -303,6 +379,8 @@ async def handle_link(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "ban_mm")
 async def on_ban_mm(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="⌛️ 30 mins", callback_data="ban_30m")],
@@ -313,7 +391,7 @@ async def on_ban_mm(callback: CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]
         ]
     )
-    await callback.message.edit_text("Выбери длительность блокировки:", reply_markup=keyboard)
+    await callback.message.answer_photo(photo, caption="Выбери длительность блокировки:", reply_markup=keyboard)
 
 
 @dp.callback_query(F.data.startswith("ban_"))
@@ -378,18 +456,23 @@ async def handle_ban_mm_photo(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "qr_code")
 async def on_qr_code(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("Отправь изображение с QR кодом.",
-                                     reply_markup=InlineKeyboardMarkup(
-                                         inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]]
-                                     ))
+    await callback.message.delete()
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]]
+    )
+    await callback.message.answer_photo(photo, caption="Отправь изображение с QR кодом.", reply_markup=keyboard)
     await state.set_state(QrCodeState.waiting_for_photo)
+
 
 @dp.callback_query(F.data == "qr_code_e")
 async def on_qr_code_e(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("Отправь изображение с QR кодом.",
-                                     reply_markup=InlineKeyboardMarkup(
-                                         inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]]
-                                     ))
+    await callback.message.delete()
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]]
+    )
+    await callback.message.answer_photo(photo, caption="Отправь изображение с QR кодом.", reply_markup=keyboard)
     await state.set_state(QrCodeEState.waiting_for_photo)
 
 
