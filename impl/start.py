@@ -341,10 +341,11 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.in_({"af_classic", "af_quick"}))
 async def on_choose_mode(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("Отправь ссылку на Steam профиль.",
-                                     reply_markup=InlineKeyboardMarkup(
-                                         inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="add_friend")]]
-                                     ))
+    await callback.message.answer("Отправь ссылку на Steam профиль.",
+                                  reply_markup=InlineKeyboardMarkup(
+                                      inline_keyboard=[
+                                          [InlineKeyboardButton(text="⬅️ Назад", callback_data="add_friend")]]
+                                  ))
     await state.update_data(action=callback.data)
     await state.set_state(LinkState.link_saved)
 
@@ -406,7 +407,7 @@ async def on_ban_duration_selected(callback: CallbackQuery, state: FSMContext):
     duration = duration_map.get(callback.data, "Unknown duration")
     await state.update_data(ban_duration=duration)
 
-    await callback.message.edit_text("Отправь изображение для обработки.",
+    await callback.message.answer("Отправь изображение для обработки.",
                                      reply_markup=InlineKeyboardMarkup(
                                          inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="ban_mm")]]
                                      ))
