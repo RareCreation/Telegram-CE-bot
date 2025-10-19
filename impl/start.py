@@ -66,7 +66,7 @@ async def start_handler(message: Message, state: FSMContext):
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="🫂 Add Friend", callback_data="add_friend")],
-                [InlineKeyboardButton(text="⚠️ Ban MM", callback_data="ban_mm")],
+                [InlineKeyboardButton(text="⚠️ Ban DOTA2", callback_data="ban_dota")],
                 [InlineKeyboardButton(text="🔷 QR PWA", callback_data="qr_code")],
                 [InlineKeyboardButton(text="🔷 5e QR-code", callback_data="qr_code_e")],
                 [InlineKeyboardButton(text="🟢 Check-online", callback_data="online_status")],
@@ -1042,7 +1042,7 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🫂 Add Friend", callback_data="add_friend")],
-            [InlineKeyboardButton(text="⚠️ Ban MM", callback_data="ban_mm")],
+            [InlineKeyboardButton(text="⚠️ Ban DOTA2", callback_data="ban_dota")],
             [InlineKeyboardButton(text="🔷 QR PWA", callback_data="qr_code")],
             [InlineKeyboardButton(text="🔷 5e QR-code", callback_data="qr_code_e")],
             [InlineKeyboardButton(text="🟢 Check-online", callback_data="online_status")],
@@ -1102,82 +1102,36 @@ async def handle_link(message: Message, state: FSMContext):
 
     await state.clear()
 
-@dp.callback_query(F.data == "ban_mm")
-async def on_ban_mm(callback: CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data == "ban_dota")
+async def on_ban_dota(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="⌛️ 30 mins", callback_data="ban_30m")],
-            [InlineKeyboardButton(text="⌛️ 1 hour", callback_data="ban_1h")],
-            [InlineKeyboardButton(text="⌛️ 2 hours", callback_data="ban_2h")],
-            [InlineKeyboardButton(text="⌛️ 24 hours", callback_data="ban_24h")],
-            [InlineKeyboardButton(text="⌛️ 7 days", callback_data="ban_7d")],
+            [InlineKeyboardButton(text="🗒 Default ban", callback_data="default_ban")],
+            [InlineKeyboardButton(text="💅 Ban with nails", callback_data="ban_with_nails")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]
         ]
     )
-    await callback.message.answer_photo(photo, caption="Выбери длительность блокировки:", reply_markup=keyboard)
+    await callback.message.answer_photo(photo, caption="<blockquote>🗒 Default ban:\n ╰ Отрисовка обычного экрана с баном.</blockquote>\n\n<blockquote> 💅Ban with nails:\n ╰ отрисовка бана с пальчиком девочки</blockquote>\n\n🧠 Выберите, какой способ вам нужен:", parse_mode="HTML", reply_markup=keyboard)
 
 
-@dp.callback_query(F.data.startswith("ban_"))
-async def on_ban_duration_selected(callback: CallbackQuery, state: FSMContext):
-    duration_map = {
-        "ban_30m": "30 Mins",
-        "ban_1h": "1 Hour",
-        "ban_2h": "2 Hours",
-        "ban_24h": "24 Hours",
-        "ban_7d": "7 Days"
-    }
-    duration = duration_map.get(callback.data, "Unknown duration")
-    await state.update_data(ban_duration=duration)
 
-    await callback.message.answer("Отправь изображение для обработки.",
-                                     reply_markup=InlineKeyboardMarkup(
-                                         inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="ban_mm")]]
-                                     ))
-    await state.set_state(BanMMState.waiting_for_photo)
 
-@dp.message(BanMMState.waiting_for_photo)
-async def handle_ban_mm_photo(message: Message, state: FSMContext):
-    if not message.photo:
-        await message.answer("Отправь изображение.")
-        return
+@dp.callback_query(F.data == "default_ban")
+async def on_default_ban(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
 
-    data = await state.get_data()
-    duration = data.get("ban_duration", "")
+    photo = FSInputFile("images/default.jpg")
+    await callback.message.answer_photo(photo)
 
-    photo = message.photo[-1]
-    file = await bot.get_file(photo.file_id)
-    filepath = file.file_path
-    file_on_disk = os.path.join(SCREENSHOTS_DIR, f"banmm_{uuid.uuid4().hex}.png")
 
-    await bot.download_file(filepath, destination=file_on_disk)
+@dp.callback_query(F.data == "ban_with_nails")
+async def on_ban_with_nails(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
 
-    try:
-        img = Image.open(file_on_disk).convert("RGB")
-        new_img = Image.new("RGB", (img.width, img.height + 20), color=(223, 191, 6))
-        new_img.paste(img, (0, 20))
-        draw = ImageDraw.Draw(new_img)
-        font_path = "fonts/NotoSans-Regular.ttf"
-        font_size = 13
-        font = ImageFont.truetype(font_path, font_size)
-        text = f"Competitive Cooldown {duration}"
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_width = bbox[2] - bbox[0]
-        text_height = bbox[3] - bbox[1]
-        x = (new_img.width - text_width) // 2
-        y = (20 - text_height) // 2
-        draw.text((x, y - 1), text, font=font, fill=(22, 22, 22, 210))
-        underline_y = y + text_height
-        draw.line((x, underline_y, x + text_width, underline_y), fill=(22, 22, 22, 210), width=1)
-        new_img.save(file_on_disk)
-        await message.answer_photo(FSInputFile(file_on_disk))
-    except Exception as e:
-        logger(f"Error processing Ban MM image: {e}")
-    finally:
-        if os.path.exists(file_on_disk):
-            os.remove(file_on_disk)
-    await state.clear()
+    photo = FSInputFile("images/nails.jpg")
+    await callback.message.answer_photo(photo)
 
 @dp.callback_query(F.data == "qr_code")
 async def on_qr_code(callback: CallbackQuery, state: FSMContext):
