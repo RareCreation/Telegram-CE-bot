@@ -10,3 +10,4 @@ numpy~=2.2.3
 pyzbar~=0.1.9
 requests~=2.32.3
 beautifulsoup4~=4.13.4
+qrcode~=8.2

@@ -15,7 +15,8 @@ from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyb
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from bs4 import BeautifulSoup
-
+from urllib.parse import urljoin, urlparse
+from utils.qrgenerate import generate_styled_qr
 from utils.screenshot import take_screenshot, take_screenshot_second
 from handlers.bot_instance import bot, dp
 from utils.logger_util import logger
@@ -55,9 +56,9 @@ async def start_handler(message: Message, state: FSMContext):
     await message.answer_photo(
         photo=photo,
         caption=(
-            "🖐Добро пожаловать в лучший отрисовщик для ворка по CN/EU\n\n"
-            "🤝<b>Спасибо что выбрали именно нас!</b>\n\n"
-            f"🥷🏻<b>Число</b> юзеров в данном боте - {user_count} 👤"
+            "🖐 Добро пожаловать в лучший отрисовщик для ворка по CN/EU\n\n"
+            "🤝<b> Спасибо что выбрали именно нас!</b>\n\n"
+            f"🥷🏻<b> Число</b> юзеров в данном боте - {user_count} 👤"
         ),
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(
@@ -66,7 +67,9 @@ async def start_handler(message: Message, state: FSMContext):
                 [InlineKeyboardButton(text="⚠️ Ban MM", callback_data="ban_mm")],
                 [InlineKeyboardButton(text="🔷 QR PWA", callback_data="qr_code")],
                 [InlineKeyboardButton(text="🔷 5e QR-code", callback_data="qr_code_e")],
-                [InlineKeyboardButton(text="🟢 Check-online", callback_data="online_status")]
+                [InlineKeyboardButton(text="🟢 Check-online", callback_data="online_status")],
+                [InlineKeyboardButton(text="📱 QR Friend Page", callback_data="qr_friend_page")],
+                [InlineKeyboardButton(text="📨 Friend Page", callback_data="friend_page")]
             ]
         )
     )
@@ -184,6 +187,681 @@ async def check_status(tg_id: int, steam_id: str, comment: str):
         finally:
             conn.close()
 
+
+class QrFriendState(StatesGroup):
+    waiting_for_link = State()
+    waiting_for_time = State()
+
+class FriendState(StatesGroup):
+    waiting_for_link = State()
+
+@dp.callback_query(F.data == "friend_page")
+async def on_friend_page(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    caption = (
+        "<blockquote>📨Friend Page\n         ╰ Friend Page - отрисовка  страницы с кодом друга и с дружественной ссылкой на странице Steam.\n         ╰  Friend Page not found - отрисовка не найденного кода друга из за разных регионов.</blockquote>"
+
+    )
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Friend Page", callback_data="friend_page_image")],
+            [InlineKeyboardButton(text="Friend Page not found", callback_data="friend_not_found")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]
+        ]
+    )
+    await callback.message.answer_photo(
+        photo,
+        caption=caption,
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+class FriendNotFoundState(StatesGroup):
+    waiting_for_link = State()
+    waiting_for_id = State()
+
+
+@dp.callback_query(F.data == "friend_not_found")
+async def on_friend_not_found(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    caption = (
+        "👀 Отправь fake-invite ссылку:\n\n"
+        "❗️ Для корректной работы отрисовщика, сначала зайдите сами на ссылку и следом скопируйте адрес из адресной строки\n\n❗️ Проверяйте так всегда, ибо клоака — вещь нетулочная"
+    )
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]]
+    )
+    await callback.message.answer_photo(
+        photo,
+        caption=caption,
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await state.set_state(FriendNotFoundState.waiting_for_link)
+
+
+@dp.message(FriendNotFoundState.waiting_for_link)
+async def process_friend_not_found_link(message: Message, state: FSMContext):
+    try:
+        url = message.text.strip()
+
+        processing_msg = await message.answer("⏳ Обработка...")
+
+        frame_url, avatar_url, persona_name = parse_steam_profile_images(url)
+
+        if not avatar_url:
+            await processing_msg.delete()
+            await message.answer("❌ Не удалось найти аватарку в профиле. Проверьте ссылку.")
+            return
+
+        await state.update_data(
+            frame_url=frame_url,
+            avatar_url=avatar_url,
+            persona_name=persona_name,
+            profile_url=url
+        )
+
+        await processing_msg.delete()
+
+
+        caption = "Отправьте код друга китайца:"
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="friend_page")]]
+        )
+
+        await message.answer(
+            caption,
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+        await state.set_state(FriendNotFoundState.waiting_for_id)
+
+    except Exception as e:
+        logger(f"Error in friend not found link processing: {e}")
+        await message.answer("❌ Произошла ошибка при обработке профиля. Попробуйте еще раз.")
+        await state.clear()
+
+
+@dp.message(FriendNotFoundState.waiting_for_id)
+async def process_friend_not_found_id(message: Message, state: FSMContext):
+    try:
+        user_id = message.text.strip()
+
+        processing_msg = await message.answer("⏳ Обработка...")
+
+        data = await state.get_data()
+        frame_url = data.get('frame_url')
+        avatar_url = data.get('avatar_url')
+        persona_name = data.get('persona_name')
+        profile_url = data.get('profile_url')
+
+        await processing_msg.edit_text("⏳ Обработка изображений...")
+
+
+        combined_image = combine_friend_not_found_images(
+            frame_url,
+            avatar_url,
+            persona_name,
+            profile_url,
+            user_id
+        )
+
+        await processing_msg.edit_text("⏳ Отправка результата...")
+
+        result_file = BufferedInputFile(combined_image.getvalue(), filename="friend_not_found_result.png")
+
+        await message.answer_photo(
+            result_file,
+            parse_mode="MarkdownV2"
+        )
+
+        await processing_msg.delete()
+        await state.clear()
+
+    except Exception as e:
+        logger(f"Error in friend not found ID processing: {e}")
+        await message.answer("❌ Произошла ошибка при создании изображения. Попробуйте еще раз.")
+        await state.clear()
+
+
+def combine_friend_not_found_images(frame_url: str, avatar_url: str, persona_name: str, profile_url: str,
+                                    user_id: str) -> BytesIO:
+    try:
+
+        background_path = "images/photo3.jpg"
+        background_image = Image.open(background_path).convert('RGBA')
+
+        avatar_size = (40, 40)
+        frame_size = (50, 50)
+
+        if avatar_url:
+            avatar_response = requests.get(avatar_url)
+            avatar_image = Image.open(BytesIO(avatar_response.content)).convert('RGBA')
+            avatar_image = avatar_image.resize(avatar_size, Image.Resampling.LANCZOS)
+        else:
+            raise ValueError("Avatar URL is required")
+
+        combined_image = Image.new('RGBA', frame_size, (0, 0, 0, 0))
+
+        avatar_position = (
+            (frame_size[0] - avatar_size[0]) // 2,
+            (frame_size[1] - avatar_size[1]) // 2
+        )
+
+        combined_image.paste(avatar_image, avatar_position)
+
+        if frame_url:
+            frame_response = requests.get(frame_url)
+            frame_image = Image.open(BytesIO(frame_response.content)).convert('RGBA')
+            frame_image = frame_image.resize(frame_size, Image.Resampling.LANCZOS)
+            combined_image = Image.alpha_composite(combined_image, frame_image)
+
+        main_position = (250, 90)
+
+        result_image = background_image.copy()
+        result_image.paste(combined_image, main_position, combined_image)
+
+        small_avatar_size = (avatar_size[0] // 2, avatar_size[1] // 2)
+        small_avatar_image = avatar_image.resize(small_avatar_size, Image.Resampling.LANCZOS)
+
+        small_frame_size = (small_avatar_size[0] + 4, small_avatar_size[1] + 4)
+        small_frame_image = Image.new('RGBA', small_frame_size, (80, 80, 80, 255))
+
+        small_avatar_position_in_frame = (
+            (small_frame_size[0] - small_avatar_size[0]) // 2,
+            (small_frame_size[1] - small_avatar_size[1]) // 2
+        )
+
+        small_frame_image.paste(small_avatar_image, small_avatar_position_in_frame, small_avatar_image)
+
+        small_avatar_position = (result_image.width - small_frame_size[0] - 335, 7)
+
+        result_image.paste(small_frame_image, small_avatar_position, small_frame_image)
+
+        draw = ImageDraw.Draw(result_image)
+
+
+        font = ImageFont.truetype("fonts/NotoSans-Medium.ttf", 20)
+        text_x = main_position[0] + frame_size[0] + 10
+        text_y = main_position[1] + (frame_size[1] - 20) // 2 - 10
+        draw.text((text_x, text_y), persona_name, fill=(220, 220, 220), font=font)
+
+        font = ImageFont.truetype("fonts/NotoSans-Medium.ttf", 9)
+
+        base_small_avatar_position = (result_image.width - small_avatar_size[0] - 375, 6)
+
+        text_length = len(persona_name)
+        if text_length > 4:
+            compensation = (text_length - 4) * 5 + 2
+            small_avatar_position = (base_small_avatar_position[0] - compensation, base_small_avatar_position[1])
+        else:
+            small_avatar_position = base_small_avatar_position
+
+        draw.text(small_avatar_position, persona_name, fill=(205, 205, 205), font=font)
+
+
+
+
+        id_font = ImageFont.truetype("fonts/NotoSans-Medium.ttf", 10)
+
+
+        id_bbox = draw.textbbox((0, 0), user_id, font=id_font)
+        id_width = id_bbox[2] - id_bbox[0]
+        id_height = id_bbox[3] - id_bbox[1]
+
+
+        id_position_x = (result_image.width - id_width) // 2 - 165
+        id_position_y = (result_image.height - id_height) // 2 - 51
+
+
+        draw.text(
+            (id_position_x, id_position_y),
+            user_id,
+            fill=(98, 101, 107),
+            font=id_font
+        )
+        url_font = ImageFont.truetype("fonts/NotoSans-Medium.ttf", 10)
+
+        url_bbox = draw.textbbox((0, 0), profile_url, font=url_font)
+        url_width = url_bbox[2] - url_bbox[0]
+        url_height = url_bbox[3] - url_bbox[1]
+
+        url_position_x = (result_image.width - url_width) // 2 - 82
+        url_position_y = (result_image.height - url_height) // 2 + 174
+
+        draw.text(
+            (url_position_x, url_position_y),
+            profile_url,
+            fill=(255, 255, 255),
+            font=url_font
+        )
+
+        output = BytesIO()
+        result_image.save(output, format='PNG')
+        output.seek(0)
+
+        return output
+
+    except Exception as e:
+        logger(f"Error combining friend not found images: {e}")
+        raise
+
+@dp.callback_query(F.data == "friend_page_image")
+async def on_friend_page(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    caption = (
+        "👀 Отправь fake-invite ссылку:\n\n"
+        "❗️ Для корректной работы отрисовщика, сначала зайдите сами на ссылку и следом скопируйте адрес из адресной строки\n\n❗️ Проверяйте так всегда, ибо клоака — вещь нетулочная"
+    )
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]]
+    )
+    await callback.message.answer_photo(
+        photo,
+        caption=caption,
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await state.set_state(FriendState.waiting_for_link)
+
+
+def combine_friend_images(frame_url: str, avatar_url: str, persona_name: str, profile_url: str) -> BytesIO:
+    try:
+        background_path = "images/photo2.jpg"
+        background_image = Image.open(background_path).convert('RGBA')
+
+        avatar_size = (40, 40)
+        frame_size = (50, 50)
+
+        if avatar_url:
+            avatar_response = requests.get(avatar_url)
+            avatar_image = Image.open(BytesIO(avatar_response.content)).convert('RGBA')
+            avatar_image = avatar_image.resize(avatar_size, Image.Resampling.LANCZOS)
+        else:
+            raise ValueError("Avatar URL is required")
+
+        combined_image = Image.new('RGBA', frame_size, (0, 0, 0, 0))
+
+        avatar_position = (
+            (frame_size[0] - avatar_size[0]) // 2,
+            (frame_size[1] - avatar_size[1]) // 2
+        )
+
+        combined_image.paste(avatar_image, avatar_position)
+
+        if frame_url:
+            frame_response = requests.get(frame_url)
+            frame_image = Image.open(BytesIO(frame_response.content)).convert('RGBA')
+            frame_image = frame_image.resize(frame_size, Image.Resampling.LANCZOS)
+            combined_image = Image.alpha_composite(combined_image, frame_image)
+
+
+        main_position = (250, 90)
+
+        result_image = background_image.copy()
+        result_image.paste(combined_image, main_position, combined_image)
+
+        small_avatar_size = (avatar_size[0] // 2, avatar_size[1] // 2)
+        small_avatar_image = avatar_image.resize(small_avatar_size, Image.Resampling.LANCZOS)
+
+        small_frame_size = (small_avatar_size[0] + 4, small_avatar_size[1] + 4)
+        small_frame_image = Image.new('RGBA', small_frame_size, (80, 80, 80, 255))
+
+        small_avatar_position_in_frame = (
+            (small_frame_size[0] - small_avatar_size[0]) // 2,
+            (small_frame_size[1] - small_avatar_size[1]) // 2
+        )
+
+
+        small_frame_image.paste(small_avatar_image, small_avatar_position_in_frame, small_avatar_image)
+
+
+        small_avatar_position = (result_image.width - small_frame_size[0] - 335, 7)
+
+
+        result_image.paste(small_frame_image, small_avatar_position, small_frame_image)
+
+        draw = ImageDraw.Draw(result_image)
+
+
+        font = ImageFont.truetype("fonts/NotoSans-Medium.ttf", 20)
+        text_x = main_position[0] + frame_size[0] + 10
+        text_y = main_position[1] + (frame_size[1] - 20) // 2 - 10
+        draw.text((text_x, text_y), persona_name, fill=(220, 220, 220), font=font)
+
+        font = ImageFont.truetype("fonts/NotoSans-Medium.ttf", 9)
+
+
+        base_small_avatar_position = (result_image.width - small_avatar_size[0] - 375, 6)
+
+
+        text_length = len(persona_name)
+        if text_length > 4:
+
+            compensation = (text_length - 4) * 5 + 2
+            small_avatar_position = (base_small_avatar_position[0] - compensation, base_small_avatar_position[1])
+        else:
+            small_avatar_position = base_small_avatar_position
+
+        draw.text(small_avatar_position, persona_name, fill=(205, 205, 205), font=font)
+
+        url_font = ImageFont.truetype("fonts/NotoSans-Medium.ttf", 10)
+
+
+        url_bbox = draw.textbbox((0, 0), profile_url, font=url_font)
+        url_width = url_bbox[2] - url_bbox[0]
+        url_height = url_bbox[3] - url_bbox[1]
+
+        url_position_x = (result_image.width - url_width) // 2 - 82
+        url_position_y = (result_image.height - url_height) // 2 + 77
+
+        draw.text(
+            (url_position_x, url_position_y),
+            profile_url,
+            fill=(255, 255, 255),
+            font=url_font
+        )
+
+        output = BytesIO()
+        result_image.save(output, format='PNG')
+        output.seek(0)
+
+        return output
+
+    except Exception as e:
+        logger(f"Error combining friend images: {e}")
+        raise
+
+
+@dp.message(FriendState.waiting_for_link)
+async def process_friend_link(message: Message, state: FSMContext):
+    try:
+        url = message.text.strip()
+
+        processing_msg = await message.answer("⏳ Обработка...")
+
+        frame_url, avatar_url, persona_name = parse_steam_profile_images(url)
+
+        if not avatar_url:
+            await processing_msg.delete()
+            await message.answer("❌ Не удалось найти аватарку в профиле. Проверьте ссылку.")
+            return
+
+        await processing_msg.edit_text("⏳ Обработка изображений...")
+
+
+        combined_image = combine_friend_images(frame_url, avatar_url, persona_name, url)
+
+        await processing_msg.edit_text("⏳ Отправка результата...")
+
+        result_file = BufferedInputFile(combined_image.getvalue(), filename="friend_result.png")
+
+        await message.answer_photo(
+            result_file,
+            parse_mode="MarkdownV2"
+        )
+
+        await processing_msg.delete()
+        await state.clear()
+
+    except Exception as e:
+        logger(f"Error in friend page: {e}")
+        await message.answer("❌ Произошла ошибка при обработке профиля. Попробуйте еще раз.")
+        await state.clear()
+
+@dp.callback_query(F.data == "qr_friend_page")
+async def on_qr_friend_page(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    caption = (
+        "<blockquote>📱QR Friend Page\n         ╰ отрисовка QR-кода на странице друзей с твоим фейком</blockquote>\n\n👀 Отправь fake-invite ссылку:\n\n"
+        "❗️ Для корректной работы отрисовщика, сначала зайдите сами на ссылку и следом скопируйте адрес из адресной строки\n\n❗️ Проверяйте так всегда, ибо клоака — вещь нетулочная"
+    )
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]]
+    )
+    await callback.message.answer_photo(
+        photo,
+        caption=caption,
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await state.set_state(QrFriendState.waiting_for_link)
+
+
+def resolve_image_url(img_src: str, profile_url: str) -> str:
+
+    if not img_src:
+        return None
+
+    parsed_src = urlparse(img_src)
+
+    if parsed_src.scheme in ("http", "https"):
+        return img_src
+
+
+    if "si.team-sv.com" in profile_url:
+
+        return urljoin(profile_url, img_src)
+
+
+    return img_src
+
+
+def parse_steam_profile_images(profile_url: str) -> tuple:
+
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        response = requests.get(profile_url, headers=headers)
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        avatar_container = soup.find("div", class_="playerAvatarAutoSizeInner")
+
+        if not avatar_container:
+            return None, None, None
+
+
+        persona_name_element = soup.find("span", class_="actual_persona_name")
+        persona_name = persona_name_element.get_text(strip=True) if persona_name_element else "Unknown"
+
+
+        frame_url = None
+        frame_img = avatar_container.find("div", class_="profile_avatar_frame")
+        if frame_img and frame_img.find("img"):
+            frame_src = frame_img.find("img")["src"]
+            frame_url = resolve_image_url(frame_src, profile_url)
+
+
+        avatar_url = None
+        all_imgs = avatar_container.find_all("img")
+        if all_imgs:
+            if len(all_imgs) > 1:
+                avatar_src = all_imgs[1]["src"]
+            else:
+                avatar_src = all_imgs[0]["src"]
+            avatar_url = resolve_image_url(avatar_src, profile_url)
+
+        return frame_url, avatar_url, persona_name
+
+    except Exception as e:
+        logger(f"Error parsing Steam profile: {e}")
+        return None, None, None
+
+
+def combine_images(frame_url: str, avatar_url: str, persona_name: str, time_text: str, profile_url: str) -> BytesIO:
+    try:
+        background_path = "images/photo.jpg"
+        background_image = Image.open(background_path).convert('RGBA')
+
+        avatar_size = (95, 95)
+        frame_size = (115, 115)
+
+        if avatar_url:
+            avatar_response = requests.get(avatar_url)
+            avatar_image = Image.open(BytesIO(avatar_response.content)).convert('RGBA')
+            avatar_image = avatar_image.resize(avatar_size, Image.Resampling.LANCZOS)
+        else:
+            raise ValueError("Avatar URL is required")
+
+        combined_image = Image.new('RGBA', frame_size, (0, 0, 0, 0))
+
+        avatar_position = (
+            (frame_size[0] - avatar_size[0]) // 2,
+            (frame_size[1] - avatar_size[1]) // 2
+        )
+
+        combined_image.paste(avatar_image, avatar_position)
+
+        if frame_url:
+            frame_response = requests.get(frame_url)
+            frame_image = Image.open(BytesIO(frame_response.content)).convert('RGBA')
+            frame_image = frame_image.resize(frame_size, Image.Resampling.LANCZOS)
+            combined_image = Image.alpha_composite(combined_image, frame_image)
+
+        position = (40, 170)
+
+        result_image = background_image.copy()
+        result_image.paste(combined_image, position, combined_image)
+
+        small_avatar_size = (avatar_size[0] // 2 + 10, avatar_size[1] // 2 + 10)
+        small_avatar_image = avatar_image.resize(small_avatar_size, Image.Resampling.LANCZOS)
+
+        small_avatar_position = (result_image.width - small_avatar_size[0] - 30, 88)
+
+        result_image.paste(small_avatar_image, small_avatar_position, small_avatar_image)
+
+        draw = ImageDraw.Draw(result_image)
+
+
+        font = ImageFont.truetype("fonts/NotoSans-Medium.ttf", 35)
+        text_x = position[0] + frame_size[0] + 10
+        text_y = position[1] + (frame_size[1] - 20) // 2 - 30
+        draw.text((text_x, text_y), persona_name, fill=(220, 220, 220), font=font)
+
+
+        time_font = ImageFont.truetype("fonts/SFNSDisplay-Bold.otf", 27)
+        time_position = (40, 25)
+        draw.text(time_position, time_text, fill=(240, 240, 240), font=time_font)
+
+
+        url_font = ImageFont.truetype("fonts/NotoSans-Medium.ttf", 20)
+        url_position_x = 58
+        url_position_y = result_image.height - 40 - 300
+
+
+        max_chars_per_line = 27
+        if len(profile_url) > max_chars_per_line:
+
+            lines = []
+            for i in range(0, len(profile_url), max_chars_per_line):
+                lines.append(profile_url[i:i + max_chars_per_line])
+
+
+            for i, line in enumerate(lines):
+                draw.text(
+                    (url_position_x, url_position_y + (i * 25)),
+                    line,
+                    fill=(255, 255, 255),
+                    font=url_font
+                )
+        else:
+
+            draw.text(
+                (url_position_x, url_position_y),
+                profile_url,
+                fill=(255, 255, 255),
+                font=url_font
+            )
+
+        qr_image = generate_styled_qr(profile_url, size=205).convert("RGBA")
+
+        qr_position = (
+            (result_image.width - qr_image.width) // 2,
+            result_image.height - qr_image.height - 610
+        )
+
+        result_image.paste(qr_image, qr_position, qr_image)
+
+        output = BytesIO()
+        result_image.save(output, format='PNG')
+        output.seek(0)
+
+        return output
+
+    except Exception as e:
+        logger(f"Error combining images: {e}")
+        raise
+@dp.message(QrFriendState.waiting_for_link)
+async def process_qr_friend_link(message: Message, state: FSMContext):
+    try:
+        url = message.text.strip()
+
+        processing_msg = await message.answer("⏳ Обработка...")
+
+        frame_url, avatar_url, persona_name = parse_steam_profile_images(url)
+
+        if not avatar_url:
+            await processing_msg.delete()
+            await message.answer("❌ Не удалось найти аватарку в профиле. Проверьте ссылку.")
+            return
+
+
+        await state.update_data(
+            frame_url=frame_url,
+            avatar_url=avatar_url,
+            persona_name=persona_name,
+            profile_url=url
+        )
+        await processing_msg.delete()
+
+        await message.answer("⏰ Выберите время для отображения:")
+        await state.set_state(QrFriendState.waiting_for_time)
+
+    except Exception as e:
+        logger(f"Error in QR friend page: {e}")
+        await message.answer("❌ Произошла ошибка при обработке профиля. Попробуйте еще раз.")
+        await state.clear()
+
+@dp.message(QrFriendState.waiting_for_time)
+async def process_qr_friend_time(message: Message, state: FSMContext):
+    try:
+        time_text = message.text.strip()
+
+        processing_msg = await message.answer("⏳ Обработка изображений...")
+
+        data = await state.get_data()
+        frame_url = data.get('frame_url')
+        avatar_url = data.get('avatar_url')
+        persona_name = data.get('persona_name')
+        profile_url = data.get('profile_url')
+
+
+        combined_image = combine_images(frame_url, avatar_url, persona_name, time_text, profile_url)
+
+        await processing_msg.edit_text("⏳ Отправка результата...")
+
+        result_file = BufferedInputFile(combined_image.getvalue(), filename="qr_friend_result.png")
+
+        await message.answer_photo(
+            result_file,
+            parse_mode="MarkdownV2"
+        )
+
+        await processing_msg.delete()
+        await state.clear()
+
+    except Exception as e:
+        logger(f"Error in QR friend page: {e}")
+        await message.answer("❌ Произошла ошибка при обработке профиля. Попробуйте еще раз.")
+        await state.clear()
 
 @dp.callback_query(F.data == "online_status")
 async def on_online_status(callback: CallbackQuery, state: FSMContext):
@@ -323,16 +1001,18 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="⚠️ Ban MM", callback_data="ban_mm")],
             [InlineKeyboardButton(text="🔷 QR PWA", callback_data="qr_code")],
             [InlineKeyboardButton(text="🔷 5e QR-code", callback_data="qr_code_e")],
-            [InlineKeyboardButton(text="🟢 Check-online", callback_data="online_status")]
+            [InlineKeyboardButton(text="🟢 Check-online", callback_data="online_status")],
+            [InlineKeyboardButton(text="📱 QR Friend Page", callback_data="qr_friend_page")],
+            [InlineKeyboardButton(text="📨 Friend Page", callback_data="friend_page")]
         ]
     )
 
     await callback.message.answer_photo(
         photo=photo,
         caption=(
-            "🖐Добро пожаловать в лучший отрисовщик для ворка по CN/EU\n\n"
-            "🤝<b>Спасибо что выбрали именно нас!</b>\n\n"
-            f"🥷🏻<b>Число</b> юзеров в данном боте - {user_count} 👤"
+            "🖐 Добро пожаловать в лучший отрисовщик для ворка по CN/EU\n\n"
+            "🤝<b> Спасибо что выбрали именно нас!</b>\n\n"
+            f"🥷🏻<b> Число</b> юзеров в данном боте - {user_count} 👤"
         ),
         parse_mode="HTML",
         reply_markup=keyboard
