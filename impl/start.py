@@ -9,13 +9,15 @@ import cv2
 import numpy as np
 import requests
 from PIL import Image, ImageDraw, ImageFont
-from aiogram import F
+from aiogram import F, types
 from aiogram.filters import Command
 from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
+
+from settings.config import ADMINS
 from utils.qrgenerate import generate_styled_qr
 from utils.screenshot import take_screenshot, take_screenshot_second
 from handlers.bot_instance import bot, dp
@@ -124,7 +126,49 @@ def get_user_count() -> int:
     conn.close()
     return count
 
+class MessageState(StatesGroup):
+    waiting_for_text = State()
 
+
+@dp.message(Command("message"))
+async def start_message_broadcast(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMINS:
+        await message.reply("🚫 У вас нет прав для использования этой команды.")
+        return
+
+    await message.answer("📝 Введите сообщение, которое хотите отправить всем пользователям.")
+    await state.set_state(MessageState.waiting_for_text)
+
+
+@dp.message(MessageState.waiting_for_text)
+async def process_broadcast_text(message: types.Message, state: FSMContext):
+    text = message.html_text
+    await state.clear()
+
+    await message.answer("📤 Начинаю отправлять сообщения ...")
+
+
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT tg_id FROM users")
+    users = [row[0] for row in cursor.fetchall()]
+    conn.close()
+
+    success = 0
+    failed = 0
+
+    for user_id in users:
+        try:
+            await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
+            success += 1
+            await asyncio.sleep(0.05)
+        except Exception:
+            failed += 1
+            continue
+
+    await message.answer(f"✅ Рассылка завершена!\n\n"
+                         f"📨 Успешно: {success}\n"
+                         f"⚠️ Ошибок: {failed}")
 
 tracking_tasks: Dict[Tuple[int, str], asyncio.Task] = {}
 
