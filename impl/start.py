@@ -679,22 +679,21 @@ async def on_qr_friend_page(callback: CallbackQuery, state: FSMContext):
 
 
 def resolve_image_url(img_src: str, profile_url: str) -> str:
-
     if not img_src:
         return None
 
     parsed_src = urlparse(img_src)
 
+
     if parsed_src.scheme in ("http", "https"):
         return img_src
 
 
-    if "si.team-sv.com" in profile_url:
+    parsed_profile = urlparse(profile_url)
+    base_url = f"{parsed_profile.scheme}://{parsed_profile.netloc}"
 
-        return urljoin(profile_url, img_src)
 
-
-    return img_src
+    return urljoin(base_url, img_src)
 
 
 def parse_steam_profile_images(profile_url: str) -> tuple:
