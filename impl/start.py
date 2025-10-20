@@ -684,7 +684,6 @@ def resolve_image_url(img_src: str, profile_url: str) -> str:
 
     parsed_src = urlparse(img_src)
 
-
     if parsed_src.scheme in ("http", "https"):
         return img_src
 
@@ -693,8 +692,17 @@ def resolve_image_url(img_src: str, profile_url: str) -> str:
     base_url = f"{parsed_profile.scheme}://{parsed_profile.netloc}"
 
 
-    return urljoin(base_url, img_src)
+    if not profile_url.endswith("/"):
+        profile_url += "/"
 
+
+    full_url = urljoin(profile_url, img_src)
+
+
+    if not full_url.startswith("http"):
+        full_url = urljoin(base_url + "/", img_src)
+
+    return full_url
 
 def parse_steam_profile_images(profile_url: str) -> tuple:
 
