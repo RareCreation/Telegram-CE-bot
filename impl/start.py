@@ -298,7 +298,7 @@ class FriendState(StatesGroup):
 async def on_friend_page(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     caption = (
-        "<blockquote>📨Friend Page\n         ╰ Отрисовка  страницы с кодом друга и с дружественной ссылкой на странице Steam.\n         ╰  🚫 Friend Page not found - отрисовка не найденного кода друга из за разных регионов.</blockquote>"
+        "<blockquote>📨Friend Page\n         ╰ Отрисовка страницы с кодом друга и с дружественной ссылкой на странице Steam.</blockquote>\n\n<blockquote>🚫 Friend Page not found:\n         ╰ Отрисовка не найденного кода друга из за разных регионов.</blockquote>"
 
     )
 
