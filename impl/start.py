@@ -173,7 +173,7 @@ async def process_ban_default_dota_photo(message: Message, state: FSMContext):
     ban_img.save(output_buffer, format="PNG")
     output_buffer.seek(0)
 
-    await message.answer_document(
+    await message.answer_photo(
         BufferedInputFile(output_buffer.getvalue(), filename="ban_preview.png")
     )
 
