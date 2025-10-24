@@ -27,59 +27,6 @@ from utils.qr_image_handler import process_qr_image, add_noise_to_center_area, d
 
 photo = FSInputFile("images/banner.png")
 
-SCREENSHOTS_DIR = "screenshots"
-if not os.path.exists(SCREENSHOTS_DIR):
-    os.makedirs(SCREENSHOTS_DIR)
-
-class LinkState(StatesGroup):
-    waiting_for_action = State()
-    link_saved = State()
-
-class BanMMState(StatesGroup):
-    waiting_for_photo = State()
-
-class QrCodeState(StatesGroup):
-    waiting_for_photo = State()
-
-class QrCodeEState(StatesGroup):
-    waiting_for_photo = State()
-
-class OnlineCheckState(StatesGroup):
-    waiting_for_profile_link = State()
-    waiting_for_comment = State()
-
-users = 0
-
-@dp.message(Command("start"))
-async def start_handler(message: Message, state: FSMContext):
-    add_user(message.from_user.id)
-    user_count = get_user_count()
-
-    await message.answer_photo(
-        photo=photo,
-        caption=(
-            "🖐 Добро пожаловать в лучший отрисовщик для ворка по CN/EU\n\n"
-            "🤝<b> Спасибо что выбрали именно нас!</b>\n\n"
-            f"🥷🏻<b> Число</b> юзеров в данном боте - {user_count} 👤"
-        ),
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="🫂 Add Friend", callback_data="add_friend")],
-                [InlineKeyboardButton(text="⚠️ Ban DOTA2", callback_data="ban_dota")],
-                [InlineKeyboardButton(text="🔷 QR PWA", callback_data="qr_code")],
-                [InlineKeyboardButton(text="🔷 5e QR-code", callback_data="qr_code_e")],
-                [InlineKeyboardButton(text="🟢 Check-online", callback_data="online_status")],
-                [InlineKeyboardButton(text="📱 QR Friend Page", callback_data="qr_friend_page")],
-                [InlineKeyboardButton(text="📨 Friend Page", callback_data="friend_page")]
-            ]
-        )
-    )
-
-    await state.clear()
-
-
-
 def init_db():
     conn = sqlite3.connect('tracking.db')
     cursor = conn.cursor()
@@ -125,6 +72,114 @@ def get_user_count() -> int:
     count = cursor.fetchone()[0]
     conn.close()
     return count
+
+SCREENSHOTS_DIR = "screenshots"
+
+if not os.path.exists(SCREENSHOTS_DIR):
+    os.makedirs(SCREENSHOTS_DIR)
+
+class LinkState(StatesGroup):
+    waiting_for_action = State()
+    link_saved = State()
+
+class BanMMState(StatesGroup):
+    waiting_for_photo = State()
+
+class QrCodeState(StatesGroup):
+    waiting_for_photo = State()
+
+class QrCodeEState(StatesGroup):
+    waiting_for_photo = State()
+
+class OnlineCheckState(StatesGroup):
+    waiting_for_profile_link = State()
+    waiting_for_comment = State()
+
+users = 0
+
+class BanDefDotaState(StatesGroup):
+    waiting_for_photo = State()
+
+@dp.message(Command("start"))
+async def start_handler(message: Message, state: FSMContext):
+    add_user(message.from_user.id)
+    user_count = get_user_count()
+
+    await message.answer_photo(
+        photo=photo,
+        caption=(
+            "🖐 Добро пожаловать в лучший отрисовщик для ворка по CN/EU\n\n"
+            "🤝<b> Спасибо что выбрали именно нас!</b>\n\n"
+            f"🥷🏻<b> Число</b> юзеров в данном боте - {user_count} 👤"
+        ),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🫂 Add Friend", callback_data="add_friend")],
+                [InlineKeyboardButton(text="⚠️ Ban DOTA2", callback_data="ban_dota")],
+                [InlineKeyboardButton(text="🟢 Check-online", callback_data="online_status")],
+                [InlineKeyboardButton(text="📱 QR Friend Page", callback_data="qr_friend_page")],
+                [InlineKeyboardButton(text="📨 Friend Page", callback_data="friend_page")],
+            ]
+        )
+    )
+
+    await state.clear()
+
+@dp.callback_query(F.data == "default_ban")
+async def ask_for_ban_default_dota_photo(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("Отправьте фотографию с лобби в DOTA2:")
+    await state.set_state(BanDefDotaState.waiting_for_photo)
+    await callback.answer()
+
+@dp.message(BanDefDotaState.waiting_for_photo)
+async def process_ban_default_dota_photo(message: Message, state: FSMContext):
+    if not message.photo:
+        await message.answer("❌ Пожалуйста, пришлите именно фото.")
+        return
+
+    photo = message.photo[-1]
+    photo_file = await bot.get_file(photo.file_id)
+    photo_bytes = await bot.download_file(photo_file.file_path)
+    img = Image.open(photo_bytes)
+
+
+    left_cut = 21
+    right_cut = 1015
+    top_cut = 66
+    bottom_cut = 13
+
+    width, height = img.size
+
+
+    cropped = img.crop((
+        left_cut,
+        top_cut,
+        width - right_cut,
+        height - bottom_cut
+    ))
+
+    new_width = cropped.width + 4
+    new_height = cropped.height + 10
+
+    stretched = cropped.resize((new_width, new_height), Image.LANCZOS)
+
+    template_path = "images/ban.jpg"
+    ban_img = Image.open(template_path).convert("RGBA")
+
+    ban_img.paste(stretched, (18, 63))
+
+    output_buffer = BytesIO()
+    ban_img.save(output_buffer, format="PNG")
+    output_buffer.seek(0)
+
+    await message.answer_document(
+        BufferedInputFile(output_buffer.getvalue(), filename="ban_preview.png")
+    )
+
+    await state.clear()
+
+
 
 class MessageState(StatesGroup):
     waiting_for_text = State()
@@ -243,14 +298,14 @@ class FriendState(StatesGroup):
 async def on_friend_page(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     caption = (
-        "<blockquote>📨Friend Page\n         ╰ Friend Page - отрисовка  страницы с кодом друга и с дружественной ссылкой на странице Steam.\n         ╰  Friend Page not found - отрисовка не найденного кода друга из за разных регионов.</blockquote>"
+        "<blockquote>📨Friend Page\n         ╰ Отрисовка  страницы с кодом друга и с дружественной ссылкой на странице Steam.\n         ╰  🚫 Friend Page not found - отрисовка не найденного кода друга из за разных регионов.</blockquote>"
 
     )
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Friend Page", callback_data="friend_page_image")],
-            [InlineKeyboardButton(text="Friend Page not found", callback_data="friend_not_found")],
+            [InlineKeyboardButton(text="📨 Friend Page", callback_data="friend_page_image")],
+            [InlineKeyboardButton(text="🚫 Friend Page not found", callback_data="friend_not_found")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]
         ]
     )
@@ -1050,11 +1105,9 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
         inline_keyboard=[
             [InlineKeyboardButton(text="🫂 Add Friend", callback_data="add_friend")],
             [InlineKeyboardButton(text="⚠️ Ban DOTA2", callback_data="ban_dota")],
-            [InlineKeyboardButton(text="🔷 QR PWA", callback_data="qr_code")],
-            [InlineKeyboardButton(text="🔷 5e QR-code", callback_data="qr_code_e")],
             [InlineKeyboardButton(text="🟢 Check-online", callback_data="online_status")],
             [InlineKeyboardButton(text="📱 QR Friend Page", callback_data="qr_friend_page")],
-            [InlineKeyboardButton(text="📨 Friend Page", callback_data="friend_page")]
+            [InlineKeyboardButton(text="📨 Friend Page", callback_data="friend_page")],
         ]
     )
 
@@ -1123,14 +1176,6 @@ async def on_ban_dota(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer_photo(photo, caption="<blockquote>🗒 Default ban:\n ╰ Отрисовка обычного экрана с баном.</blockquote>\n\n<blockquote> 💅Ban with nails:\n ╰ отрисовка бана с пальчиком девочки</blockquote>\n\n🧠 Выберите, какой способ вам нужен:", parse_mode="HTML", reply_markup=keyboard)
 
 
-
-
-@dp.callback_query(F.data == "default_ban")
-async def on_default_ban(callback: CallbackQuery, state: FSMContext):
-    await callback.message.delete()
-
-    photo = FSInputFile("images/default.jpg")
-    await callback.message.answer_photo(photo)
 
 
 @dp.callback_query(F.data == "ban_with_nails")
