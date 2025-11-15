@@ -571,11 +571,12 @@ async def on_friend_page(callback: CallbackQuery, state: FSMContext):
 
 def combine_friend_images(frame_url: str, avatar_url: str, persona_name: str, profile_url: str) -> BytesIO:
     try:
-        background_path = "images/photo2.jpg"
+        background_path = "images/friend3.png"
         background_image = Image.open(background_path).convert('RGBA')
 
-        avatar_size = (40, 40)
-        frame_size = (50, 50)
+
+        avatar_size = (45, 45)
+        frame_size = (55, 55)
 
         if avatar_url:
             avatar_response = requests.get(avatar_url)
@@ -600,7 +601,7 @@ def combine_friend_images(frame_url: str, avatar_url: str, persona_name: str, pr
             combined_image = Image.alpha_composite(combined_image, frame_image)
 
 
-        main_position = (250, 90)
+        main_position = (370, 160)
 
         result_image = background_image.copy()
         result_image.paste(combined_image, main_position, combined_image)
@@ -620,7 +621,7 @@ def combine_friend_images(frame_url: str, avatar_url: str, persona_name: str, pr
         small_frame_image.paste(small_avatar_image, small_avatar_position_in_frame, small_avatar_image)
 
 
-        small_avatar_position = (result_image.width - small_frame_size[0] - 335, 7)
+        small_avatar_position = (result_image.width - small_frame_size[0] - 525, 7)
 
 
         result_image.paste(small_frame_image, small_avatar_position, small_frame_image)
@@ -635,8 +636,8 @@ def combine_friend_images(frame_url: str, avatar_url: str, persona_name: str, pr
 
         font = ImageFont.truetype("fonts/NotoSans-Medium.ttf", 9)
 
-
-        base_small_avatar_position = (result_image.width - small_avatar_size[0] - 375, 6)
+        font3 = ImageFont.truetype("fonts/NotoSans-Medium.ttf", 10)
+        base_small_avatar_position = (result_image.width - small_avatar_size[0] - 560, 9)
 
 
         text_length = len(persona_name)
@@ -647,17 +648,17 @@ def combine_friend_images(frame_url: str, avatar_url: str, persona_name: str, pr
         else:
             small_avatar_position = base_small_avatar_position
 
-        draw.text(small_avatar_position, persona_name, fill=(205, 205, 205), font=font)
+        draw.text(small_avatar_position, persona_name, fill=(205, 205, 205), font=font3)
 
-        url_font = ImageFont.truetype("fonts/NotoSans-Medium.ttf", 10)
+        url_font = ImageFont.truetype("fonts/NotoSans-Medium.ttf", 13)
 
 
         url_bbox = draw.textbbox((0, 0), profile_url, font=url_font)
         url_width = url_bbox[2] - url_bbox[0]
         url_height = url_bbox[3] - url_bbox[1]
 
-        url_position_x = (result_image.width - url_width) // 2 - 82
-        url_position_y = (result_image.height - url_height) // 2 + 77
+        url_position_x = (result_image.width - url_width) // 2 - 110
+        url_position_y = (result_image.height - url_height) // 2 + 117
 
         draw.text(
             (url_position_x, url_position_y),
