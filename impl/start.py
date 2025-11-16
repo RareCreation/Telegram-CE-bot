@@ -657,7 +657,7 @@ def combine_friend_images(frame_url: str, avatar_url: str, persona_name: str, pr
         url_width = url_bbox[2] - url_bbox[0]
         url_height = url_bbox[3] - url_bbox[1]
 
-        url_position_x = (result_image.width - url_width) // 2 - 140
+        url_position_x = 670
         url_position_y = (result_image.height - url_height) // 2 + 117
 
         draw.text(
