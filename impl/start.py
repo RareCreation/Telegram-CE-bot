@@ -762,43 +762,41 @@ def resolve_image_url(img_src: str, profile_url: str) -> str:
 
 
 
-
-
 def parse_steam_profile_images(profile_url: str) -> tuple:
-
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
+        headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(profile_url, headers=headers)
         response.raise_for_status()
-
         soup = BeautifulSoup(response.text, "html.parser")
-        avatar_container = soup.find("div", class_="playerAvatarAutoSizeInner")
 
+        avatar_container = soup.find("div", class_="playerAvatarAutoSizeInner")
         if not avatar_container:
             return None, None, None
 
-
-        persona_name_element = soup.find("span", class_="actual_persona_name")
-        persona_name = persona_name_element.get_text(strip=True) if persona_name_element else "Unknown"
-
+        persona_name_el = soup.find("span", class_="actual_persona_name")
+        persona_name = persona_name_el.get_text(strip=True) if persona_name_el else "Unknown"
 
         frame_url = None
-        frame_img = avatar_container.find("div", class_="profile_avatar_frame")
-        if frame_img and frame_img.find("img"):
-            frame_src = frame_img.find("img")["src"]
-            frame_url = resolve_image_url(frame_src, profile_url)
-
+        frame_block = avatar_container.find("div", class_="profile_avatar_frame")
+        if frame_block:
+            img_tag = frame_block.find("img")
+            if img_tag and img_tag.get("src"):
+                frame_url = resolve_image_url(img_tag["src"], profile_url)
+            else:
+                source = frame_block.find("source")
+                if source and source.get("srcset"):
+                    frame_url = resolve_image_url(source["srcset"], profile_url)
 
         avatar_url = None
-        all_imgs = avatar_container.find_all("img")
-        if all_imgs:
-            if len(all_imgs) > 1:
-                avatar_src = all_imgs[1]["src"]
+        picture_block = avatar_container.find("picture")
+        if picture_block:
+            img_tag = picture_block.find("img")
+            if img_tag and img_tag.get("src"):
+                avatar_url = resolve_image_url(img_tag["src"], profile_url)
             else:
-                avatar_src = all_imgs[0]["src"]
-            avatar_url = resolve_image_url(avatar_src, profile_url)
+                source = picture_block.find("source")
+                if source and source.get("srcset"):
+                    avatar_url = resolve_image_url(source["srcset"], profile_url)
 
         return frame_url, avatar_url, persona_name
 
