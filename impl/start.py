@@ -760,6 +760,10 @@ def resolve_image_url(img_src: str, profile_url: str) -> str:
 
     return full_url
 
+def extract_src(tag):
+    return tag.get("src") or tag.get("srcset")
+
+
 def parse_steam_profile_images(profile_url: str) -> tuple:
     try:
         headers = {
@@ -777,36 +781,26 @@ def parse_steam_profile_images(profile_url: str) -> tuple:
         persona_name_element = soup.find("span", class_="actual_persona_name")
         persona_name = persona_name_element.get_text(strip=True) if persona_name_element else "Unknown"
 
-
         frame_url = None
         frame_div = avatar_container.find("div", class_="profile_avatar_frame")
         if frame_div:
-
-            sources = frame_div.find_all(["img", "source"])
-            for s in sources:
-                src = s.get("src") or s.get("srcset")
-                if src:
-                    if not src.lower().endswith(".gif"):
-                        frame_url = resolve_image_url(src, profile_url)
-                        break
+            for tag in frame_div.find_all(["img", "source"]):
+                src = extract_src(tag)
+                if src and not src.lower().endswith(".gif"):
+                    frame_url = resolve_image_url(src, profile_url)
+                    break
 
         avatar_url = None
-
-
-        candidates = avatar_container.find_all(["img", "source"])
-
-        for tag in candidates:
-            src = tag.get("src") or tag.get("srcset")
+        picture_tags = avatar_container.find_all(["img", "source"])
+        for tag in picture_tags:
+            src = extract_src(tag)
             if not src:
                 continue
-
             lower = src.lower()
             if lower.endswith(".gif"):
                 continue
-
             if "avatar_frame" in lower:
                 continue
-
             avatar_url = resolve_image_url(src, profile_url)
             break
 
