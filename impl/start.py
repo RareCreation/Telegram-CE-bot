@@ -761,7 +761,6 @@ def resolve_image_url(img_src: str, profile_url: str) -> str:
     return full_url
 
 def parse_steam_profile_images(profile_url: str) -> tuple:
-
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -775,32 +774,48 @@ def parse_steam_profile_images(profile_url: str) -> tuple:
         if not avatar_container:
             return None, None, None
 
-
         persona_name_element = soup.find("span", class_="actual_persona_name")
         persona_name = persona_name_element.get_text(strip=True) if persona_name_element else "Unknown"
 
 
         frame_url = None
-        frame_img = avatar_container.find("div", class_="profile_avatar_frame")
-        if frame_img and frame_img.find("img"):
-            frame_src = frame_img.find("img")["src"]
-            frame_url = resolve_image_url(frame_src, profile_url)
+        frame_div = avatar_container.find("div", class_="profile_avatar_frame")
+        if frame_div:
 
+            sources = frame_div.find_all(["img", "source"])
+            for s in sources:
+                src = s.get("src") or s.get("srcset")
+                if src:
+                    if not src.lower().endswith(".gif"):
+                        frame_url = resolve_image_url(src, profile_url)
+                        break
 
         avatar_url = None
-        all_imgs = avatar_container.find_all("img")
-        if all_imgs:
-            if len(all_imgs) > 1:
-                avatar_src = all_imgs[1]["src"]
-            else:
-                avatar_src = all_imgs[0]["src"]
-            avatar_url = resolve_image_url(avatar_src, profile_url)
+
+
+        candidates = avatar_container.find_all(["img", "source"])
+
+        for tag in candidates:
+            src = tag.get("src") or tag.get("srcset")
+            if not src:
+                continue
+
+            lower = src.lower()
+            if lower.endswith(".gif"):
+                continue
+
+            if "avatar_frame" in lower:
+                continue
+
+            avatar_url = resolve_image_url(src, profile_url)
+            break
 
         return frame_url, avatar_url, persona_name
 
     except Exception as e:
         logger(f"Error parsing Steam profile: {e}")
         return None, None, None
+
 
 
 def combine_images(frame_url: str, avatar_url: str, persona_name: str, time_text: str, profile_url: str) -> BytesIO:
