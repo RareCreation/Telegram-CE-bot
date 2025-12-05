@@ -761,7 +761,6 @@ def resolve_image_url(img_src: str, profile_url: str) -> str:
     return full_url
 
 
-
 def parse_steam_profile_images(profile_url: str) -> tuple:
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -788,13 +787,14 @@ def parse_steam_profile_images(profile_url: str) -> tuple:
                     frame_url = resolve_image_url(source["srcset"], profile_url)
 
         avatar_url = None
-        picture_block = avatar_container.find("picture")
-        if picture_block:
-            img_tag = picture_block.find("img")
+        pictures = avatar_container.find_all("picture")
+        if len(pictures) > 1:
+            avatar_pic = pictures[1]
+            img_tag = avatar_pic.find("img")
             if img_tag and img_tag.get("src"):
                 avatar_url = resolve_image_url(img_tag["src"], profile_url)
             else:
-                source = picture_block.find("source")
+                source = avatar_pic.find("source")
                 if source and source.get("srcset"):
                     avatar_url = resolve_image_url(source["srcset"], profile_url)
 
@@ -803,6 +803,7 @@ def parse_steam_profile_images(profile_url: str) -> tuple:
     except Exception as e:
         logger(f"Error parsing Steam profile: {e}")
         return None, None, None
+
 
 
 def combine_images(frame_url: str, avatar_url: str, persona_name: str, time_text: str, profile_url: str) -> BytesIO:
