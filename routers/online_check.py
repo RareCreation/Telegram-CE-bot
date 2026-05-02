@@ -1,6 +1,6 @@
 import re
 import asyncio
-from aiogram import F, Dispatcher
+from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
@@ -14,7 +14,14 @@ from utils.database import (
 from utils.steam_parser import extract_steam_id
 from utils.tracking import tracking_tasks, check_status
 
+router = Router(name="online_check")
 
+
+def load(dp: Router) -> None:
+    dp.include_router(router)
+
+
+@router.callback_query(F.data == "online_status")
 async def on_online_status(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     caption = (
@@ -34,6 +41,7 @@ async def on_online_status(callback: CallbackQuery, state: FSMContext):
     await state.set_state(OnlineCheckState.waiting_for_profile_link)
 
 
+@router.message(OnlineCheckState.waiting_for_profile_link)
 async def handle_online_status_link(message: Message, state: FSMContext):
     url = message.text.strip()
     steam_id = extract_steam_id(url)
@@ -68,6 +76,7 @@ async def handle_online_status_link(message: Message, state: FSMContext):
     await state.set_state(OnlineCheckState.waiting_for_comment)
 
 
+@router.message(OnlineCheckState.waiting_for_comment)
 async def handle_profile_comment(message: Message, state: FSMContext):
     comment = message.text.strip()
     data = await state.get_data()
@@ -84,9 +93,3 @@ async def handle_profile_comment(message: Message, state: FSMContext):
                          f"📎 {url}\n"
                          f"💬 Комментарий: \"{comment}\"")
     await state.clear()
-
-
-def register_handlers(dp: Dispatcher):
-    dp.callback_query.register(on_online_status, F.data == "online_status")
-    dp.message.register(handle_online_status_link, OnlineCheckState.waiting_for_profile_link)
-    dp.message.register(handle_profile_comment, OnlineCheckState.waiting_for_comment)

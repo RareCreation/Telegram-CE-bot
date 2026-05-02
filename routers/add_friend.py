@@ -1,6 +1,6 @@
 import os
 import uuid
-from aiogram import F, Dispatcher
+from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, FSInputFile
 from aiogram.fsm.context import FSMContext
 
@@ -11,7 +11,13 @@ from utils.constants import SCREENSHOTS_DIR, PHOTO
 from utils.logger_util import logger
 from handlers.bot_instance import bot
 
+router = Router(name="add_friend")
 
+def load(dp: Router) -> None:
+    dp.include_router(router)
+
+
+@router.callback_query(F.data == "add_friend")
 async def on_add_friend(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     await callback.message.answer_photo(
@@ -29,6 +35,7 @@ async def on_add_friend(callback: CallbackQuery, state: FSMContext):
     await state.set_state(LinkState.waiting_for_action)
 
 
+@router.callback_query(F.data.in_({"af_classic", "af_quick"}))
 async def on_choose_mode(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         "Отправь ссылку на Steam профиль.",
@@ -36,8 +43,10 @@ async def on_choose_mode(callback: CallbackQuery, state: FSMContext):
     )
     await state.update_data(action=callback.data)
     await state.set_state(LinkState.link_saved)
+    await callback.answer()
 
 
+@router.message(LinkState.link_saved)
 async def handle_link(message: Message, state: FSMContext):
     data = await state.get_data()
     action = data.get("action")
@@ -47,7 +56,6 @@ async def handle_link(message: Message, state: FSMContext):
         await message.answer("❌ Некорректная ссылка. Пожалуйста, отправьте ссылку на профиль Steam.")
         return
 
-    
     os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
 
     filename = os.path.join(SCREENSHOTS_DIR, f"steam_profile_{uuid.uuid4().hex}.png")
@@ -59,7 +67,6 @@ async def handle_link(message: Message, state: FSMContext):
         else:
             await take_screenshot_second(url, filename)
 
-        
         if os.path.exists(filename):
             photo = FSInputFile(filename)
             await message.answer_photo(photo)
@@ -71,22 +78,15 @@ async def handle_link(message: Message, state: FSMContext):
         logger.error(f"AF error: {e}")
         await message.answer(f"❌ Произошла ошибка: {str(e)}")
     finally:
-        
         if os.path.exists(filename):
             try:
                 os.remove(filename)
             except Exception as e:
                 logger.error(f"Failed to remove file {filename}: {e}")
-        
+
         try:
             await bot.delete_message(chat_id=message.chat.id, message_id=wait_msg.message_id)
         except Exception:
-            pass  
+            pass
 
     await state.clear()
-
-
-def register_handlers(dp: Dispatcher):
-    dp.callback_query.register(on_add_friend, F.data == "add_friend")
-    dp.callback_query.register(on_choose_mode, F.data.in_({"af_classic", "af_quick"}))
-    dp.message.register(handle_link, LinkState.link_saved)

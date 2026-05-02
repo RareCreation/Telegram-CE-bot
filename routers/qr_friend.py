@@ -1,5 +1,5 @@
 from io import BytesIO
-from aiogram import F, Dispatcher
+from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from PIL import Image, ImageDraw, ImageFont
@@ -11,6 +11,12 @@ from utils.constants import PHOTO
 from utils.steam_parser import parse_steam_profile_images
 from utils.qrgenerate import generate_styled_qr
 from utils.logger_util import logger
+
+router = Router(name="qr_friend")
+
+
+def load(dp: Router) -> None:
+    dp.include_router(router)
 
 
 def combine_images(frame_url: str, avatar_url: str, persona_name: str, time_text: str, profile_url: str) -> BytesIO:
@@ -110,6 +116,7 @@ def combine_images(frame_url: str, avatar_url: str, persona_name: str, time_text
         raise
 
 
+@router.callback_query(F.data == "qr_friend_page")
 async def on_qr_friend_page(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     caption = (
@@ -128,6 +135,7 @@ async def on_qr_friend_page(callback: CallbackQuery, state: FSMContext):
     await state.set_state(QrFriendState.waiting_for_link)
 
 
+@router.message(QrFriendState.waiting_for_link)
 async def process_qr_friend_link(message: Message, state: FSMContext):
     try:
         url = message.text.strip()
@@ -158,6 +166,7 @@ async def process_qr_friend_link(message: Message, state: FSMContext):
         await state.clear()
 
 
+@router.message(QrFriendState.waiting_for_time)
 async def process_qr_friend_time(message: Message, state: FSMContext):
     try:
         time_text = message.text.strip()
@@ -188,9 +197,3 @@ async def process_qr_friend_time(message: Message, state: FSMContext):
         logger.error(f"Error in QR friend page: {e}")
         await message.answer("❌ Произошла ошибка при обработке профиля. Попробуйте еще раз.")
         await state.clear()
-
-
-def register_handlers(dp: Dispatcher):
-    dp.callback_query.register(on_qr_friend_page, F.data == "qr_friend_page")
-    dp.message.register(process_qr_friend_link, QrFriendState.waiting_for_link)
-    dp.message.register(process_qr_friend_time, QrFriendState.waiting_for_time)

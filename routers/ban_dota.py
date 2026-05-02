@@ -1,5 +1,5 @@
 from io import BytesIO
-from aiogram import F, Dispatcher
+from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from PIL import Image
@@ -9,7 +9,14 @@ from keyboards.main_keyboards import get_ban_dota_keyboard
 from utils.constants import PHOTO, NAILS_PHOTO
 from handlers.bot_instance import bot
 
+router = Router(name="ban_dota")
 
+
+def load(dp: Router) -> None:
+    dp.include_router(router)
+
+
+@router.callback_query(F.data == "ban_dota")
 async def on_ban_dota(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
 
@@ -25,12 +32,14 @@ async def on_ban_dota(callback: CallbackQuery, state: FSMContext):
     )
 
 
+@router.callback_query(F.data == "default_ban")
 async def ask_for_ban_default_dota_photo(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("Отправьте фотографию с лобби в DOTA2:")
     await state.set_state(BanDefDotaState.waiting_for_photo)
     await callback.answer()
 
 
+@router.message(BanDefDotaState.waiting_for_photo)
 async def process_ban_default_dota_photo(message: Message, state: FSMContext):
     if not message.photo:
         await message.answer("❌ Пожалуйста, пришлите именно фото.")
@@ -76,13 +85,7 @@ async def process_ban_default_dota_photo(message: Message, state: FSMContext):
     await state.clear()
 
 
+@router.callback_query(F.data == "ban_with_nails")
 async def on_ban_with_nails(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     await callback.message.answer_photo(NAILS_PHOTO)
-
-
-def register_handlers(dp: Dispatcher):
-    dp.callback_query.register(on_ban_dota, F.data == "ban_dota")
-    dp.callback_query.register(ask_for_ban_default_dota_photo, F.data == "default_ban")
-    dp.message.register(process_ban_default_dota_photo, BanDefDotaState.waiting_for_photo)
-    dp.callback_query.register(on_ban_with_nails, F.data == "ban_with_nails")

@@ -1,5 +1,5 @@
 from io import BytesIO
-from aiogram import F, Dispatcher
+from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from PIL import Image, ImageDraw, ImageFont
@@ -8,8 +8,14 @@ import requests
 from states.states import FriendState, FriendNotFoundState
 from keyboards.main_keyboards import get_friend_page_keyboard, get_back_button
 from utils.constants import PHOTO
-from utils.steam_parser import parse_steam_profile_images, resolve_image_url
+from utils.steam_parser import parse_steam_profile_images
 from utils.logger_util import logger
+
+router = Router(name="friend_page")
+
+
+def load(dp: Router) -> None:
+    dp.include_router(router)
 
 
 def combine_friend_images(frame_url: str, avatar_url: str, persona_name: str, profile_url: str) -> BytesIO:
@@ -224,6 +230,7 @@ def combine_friend_not_found_images(frame_url: str, avatar_url: str, persona_nam
         raise
 
 
+@router.callback_query(F.data == "friend_page")
 async def on_friend_page(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     caption = (
@@ -239,6 +246,7 @@ async def on_friend_page(callback: CallbackQuery, state: FSMContext):
     )
 
 
+@router.callback_query(F.data == "friend_page_image")
 async def on_friend_page_image(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     caption = (
@@ -256,6 +264,7 @@ async def on_friend_page_image(callback: CallbackQuery, state: FSMContext):
     await state.set_state(FriendState.waiting_for_link)
 
 
+@router.message(FriendState.waiting_for_link)
 async def process_friend_link(message: Message, state: FSMContext):
     try:
         url = message.text.strip()
@@ -291,6 +300,7 @@ async def process_friend_link(message: Message, state: FSMContext):
         await state.clear()
 
 
+@router.callback_query(F.data == "friend_not_found")
 async def on_friend_not_found(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     caption = (
@@ -308,6 +318,7 @@ async def on_friend_not_found(callback: CallbackQuery, state: FSMContext):
     await state.set_state(FriendNotFoundState.waiting_for_link)
 
 
+@router.message(FriendNotFoundState.waiting_for_link)
 async def process_friend_not_found_link(message: Message, state: FSMContext):
     try:
         url = message.text.strip()
@@ -345,6 +356,7 @@ async def process_friend_not_found_link(message: Message, state: FSMContext):
         await state.clear()
 
 
+@router.message(FriendNotFoundState.waiting_for_id)
 async def process_friend_not_found_id(message: Message, state: FSMContext):
     try:
         user_id = message.text.strip()
@@ -383,12 +395,3 @@ async def process_friend_not_found_id(message: Message, state: FSMContext):
         logger.error(f"Error in friend not found ID processing: {e}")
         await message.answer("❌ Произошла ошибка при создании изображения. Попробуйте еще раз.")
         await state.clear()
-
-
-def register_handlers(dp: Dispatcher):
-    dp.callback_query.register(on_friend_page, F.data == "friend_page")
-    dp.callback_query.register(on_friend_page_image, F.data == "friend_page_image")
-    dp.callback_query.register(on_friend_not_found, F.data == "friend_not_found")
-    dp.message.register(process_friend_link, FriendState.waiting_for_link)
-    dp.message.register(process_friend_not_found_link, FriendNotFoundState.waiting_for_link)
-    dp.message.register(process_friend_not_found_id, FriendNotFoundState.waiting_for_id)

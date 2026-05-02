@@ -2,7 +2,7 @@ import os
 import cv2
 import numpy as np
 from io import BytesIO
-from aiogram import F, Dispatcher
+from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 
@@ -11,6 +11,12 @@ from keyboards.main_keyboards import get_back_button
 from utils.constants import PHOTO
 from utils.qr_image_handler import process_qr_image2, rotate_image_with_transparency
 from handlers.bot_instance import bot
+
+router = Router(name="qr_code")
+
+
+def load(dp: Router) -> None:
+    dp.include_router(router)
 
 
 def overlay_image_alpha(background, overlay, x, y):
@@ -25,6 +31,7 @@ def overlay_image_alpha(background, overlay, x, y):
         ).astype(np.uint8)
 
 
+@router.callback_query(F.data == "qr_code")
 async def on_qr_code(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
 
@@ -36,6 +43,7 @@ async def on_qr_code(callback: CallbackQuery, state: FSMContext):
     await state.set_state(QrCodeState.waiting_for_photo)
 
 
+@router.callback_query(F.data == "qr_code_e")
 async def on_qr_code_e(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
 
@@ -47,6 +55,7 @@ async def on_qr_code_e(callback: CallbackQuery, state: FSMContext):
     await state.set_state(QrCodeEState.waiting_for_photo)
 
 
+@router.message(QrCodeState.waiting_for_photo)
 async def handle_qr_code_photo(message: Message, state: FSMContext):
     photo = message.photo[-1]
     file = await bot.get_file(photo.file_id)
@@ -78,6 +87,7 @@ async def handle_qr_code_photo(message: Message, state: FSMContext):
     await state.clear()
 
 
+@router.message(QrCodeEState.waiting_for_photo)
 async def handle_qr_code_e_photo(message: Message, state: FSMContext):
     photo = message.photo[-1]
     file = await bot.get_file(photo.file_id)
@@ -107,10 +117,3 @@ async def handle_qr_code_e_photo(message: Message, state: FSMContext):
     await message.answer_photo(photo=main_output)
 
     await state.clear()
-
-
-def register_handlers(dp: Dispatcher):
-    dp.callback_query.register(on_qr_code, F.data == "qr_code")
-    dp.callback_query.register(on_qr_code_e, F.data == "qr_code_e")
-    dp.message.register(handle_qr_code_photo, QrCodeState.waiting_for_photo)
-    dp.message.register(handle_qr_code_e_photo, QrCodeEState.waiting_for_photo)
