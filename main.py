@@ -7,6 +7,7 @@ from settings.config import TOKEN
 from utils.database import init_db, init_users_db
 from utils.load_routers import load_routers
 from utils.logger_util import logger
+from utils.tracking import restore_tracking_tasks
 
 
 async def setup_bot_commands(bot: Bot):
@@ -25,6 +26,8 @@ async def main():
 
     await load_routers(dp=dp, bot=bot)
     logger.info("routers loaded")
+
+    await restore_tracking_tasks()
 
     logger.info("Starting bot...")
     await dp.start_polling(bot, skip_updates=True)
