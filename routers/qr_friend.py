@@ -8,7 +8,7 @@ import requests
 from states.states import QrFriendState
 from keyboards.main_keyboards import get_back_button
 from utils.constants import PHOTO
-from utils.steam_parser import parse_steam_profile_images
+from utils.steam_parser import parse_steam_profile_images, get_requests_session, download_image
 from utils.qrgenerate import generate_styled_qr
 from utils.logger_util import logger
 
@@ -28,8 +28,9 @@ def combine_images(frame_url: str, avatar_url: str, persona_name: str, time_text
         frame_size = (115, 115)
 
         if avatar_url:
-            avatar_response = requests.get(avatar_url)
-            avatar_image = Image.open(BytesIO(avatar_response.content)).convert('RGBA')
+            session = get_requests_session()
+
+            avatar_image = download_image(session, avatar_url)
             avatar_image = avatar_image.resize(avatar_size, Image.Resampling.LANCZOS)
         else:
             raise ValueError("Avatar URL is required")
@@ -44,10 +45,23 @@ def combine_images(frame_url: str, avatar_url: str, persona_name: str, time_text
         combined_image.paste(avatar_image, avatar_position)
 
         if frame_url:
-            frame_response = requests.get(frame_url)
-            frame_image = Image.open(BytesIO(frame_response.content)).convert('RGBA')
-            frame_image = frame_image.resize(frame_size, Image.Resampling.LANCZOS)
-            combined_image = Image.alpha_composite(combined_image, frame_image)
+            try:
+                frame_image = download_image(session, frame_url)
+
+                frame_image = frame_image.resize(
+                    frame_size,
+                    Image.Resampling.LANCZOS
+                )
+
+                combined_image = Image.alpha_composite(
+                    combined_image,
+                    frame_image
+                )
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load frame image: {e}"
+                )
 
         position = (40, 170)
 
