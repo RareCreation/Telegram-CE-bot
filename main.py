@@ -4,6 +4,7 @@ from aiogram.types import BotCommand
 
 from handlers.bot_instance import bot, dp
 from settings.config import TOKEN
+from utils.check_status_util import restore_tracking
 from utils.database import init_db, init_users_db
 from utils.load_routers import load_routers
 from utils.logger_util import logger
@@ -24,12 +25,11 @@ async def main():
     await setup_bot_commands(bot)
 
     await load_routers(dp=dp, bot=bot)
-    logger.info("routers loaded")
 
+    await restore_tracking()
 
     logger.info("Starting bot...")
     await dp.start_polling(bot, skip_updates=True)
-
 
 
 
