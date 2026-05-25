@@ -22,7 +22,7 @@ def get_requests_session():
             "text/html,application/xhtml+xml,"
             "application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
         ),
-        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
         "Cache-Control": "no-cache",
@@ -60,6 +60,163 @@ def extract_image_url(tag):
         return srcset.split(",")[0].split()[0].strip()
 
     return None
+
+
+def is_china_profile(url: str) -> bool:
+    return "my.steamchina.com" in url or "steamchina.com" in url
+
+
+def parse_china_profile_status(html: str) -> dict:
+    soup = BeautifulSoup(html, "html.parser")
+
+    result = {
+        "status_code": 0,
+        "status_text": "离线",
+        "persona_name": "Unknown"
+    }
+
+    
+    persona_name_el = soup.find("span", class_="actual_persona_name")
+    if persona_name_el:
+        result["persona_name"] = persona_name_el.get_text(strip=True)
+
+    
+    
+    status_container = soup.find("div", class_="responsive_status_info")
+    if status_container:
+        profile_in_game = status_container.find("div", class_="profile_in_game")
+        if profile_in_game:
+            
+            classes = profile_in_game.get("class", [])
+
+            
+            if "online" in classes:
+                result["status_code"] = 1
+                result["status_text"] = "在线"
+                logger.debug(f"China profile: found 'online' class. Status set to ONLINE.")
+
+            
+            status_header = profile_in_game.find("div", class_="profile_in_game_header")
+            if status_header:
+                header_text = status_header.get_text(strip=True)
+                if "当前在线" in header_text or "在线" in header_text:
+                    result["status_code"] = 1
+                    result["status_text"] = header_text
+                    logger.debug(f"China profile: found online header text '{header_text}'. Status set to ONLINE.")
+                elif "离线" in header_text:
+                    result["status_code"] = 0
+                    result["status_text"] = header_text
+                    logger.debug(f"China profile: found offline header text '{header_text}'. Status set to OFFLINE.")
+        else:
+            logger.warning("China profile: 'profile_in_game' div not found inside 'responsive_status_info'.")
+    else:
+        logger.warning("China profile: 'responsive_status_info' div not found.")
+
+    
+    if result["status_code"] == 0:
+        avatar_div = soup.find("div", class_="playerAvatar")
+        if avatar_div and "online" in avatar_div.get("class", []):
+            result["status_code"] = 1
+            result["status_text"] = "在线"
+            logger.debug("China profile: fallback - found 'online' class in playerAvatar.")
+
+    logger.debug(f"Final China profile parse result: {result}")
+    return result
+
+
+def parse_steam_profile_status(profile_url: str) -> dict:
+
+    try:
+        session = get_requests_session()
+
+        response = session.get(
+            profile_url,
+            timeout=20,
+            allow_redirects=True
+        )
+
+        logger.debug(f"GET {profile_url} -> {response.status_code}")
+
+        if response.status_code != 200:
+            logger.error(f"HTTP {response.status_code} for {profile_url}")
+            return None
+
+        
+        if is_china_profile(profile_url):
+            return parse_china_profile_status(response.text)
+
+        
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        result = {
+            "status_code": None,
+            "status_text": None,
+            "persona_name": "Unknown"
+        }
+
+        
+        persona_name_el = soup.find("span", class_="actual_persona_name")
+        if persona_name_el:
+            result["persona_name"] = persona_name_el.get_text(strip=True)
+
+        
+        
+        profile_in_game = soup.find("div", class_="profile_in_game")
+        if profile_in_game:
+            classes = profile_in_game.get("class", [])
+            if "online" in classes:
+                result["status_code"] = 1
+                result["status_text"] = "Online"
+            elif "in-game" in classes:
+                result["status_code"] = 1
+                result["status_text"] = "In-Game"
+            elif "away" in classes:
+                result["status_code"] = 2
+                result["status_text"] = "Away"
+            elif "busy" in classes:
+                result["status_code"] = 3
+                result["status_text"] = "Busy"
+            elif "offline" in classes:
+                result["status_code"] = 0
+                result["status_text"] = "Offline"
+
+        
+        if result["status_code"] is None:
+            status_header = soup.find("div", class_="profile_in_game_header")
+            if status_header:
+                status_text = status_header.get_text(strip=True).lower()
+                if "online" in status_text or "in-game" in status_text:
+                    result["status_code"] = 1
+                    result["status_text"] = "Online"
+                elif "away" in status_text:
+                    result["status_code"] = 2
+                    result["status_text"] = "Away"
+                elif "busy" in status_text:
+                    result["status_code"] = 3
+                    result["status_text"] = "Busy"
+                elif "offline" in status_text:
+                    result["status_code"] = 0
+                    result["status_text"] = "Offline"
+
+        
+        if result["status_code"] is None:
+            avatar_div = soup.find("div", class_="playerAvatar")
+            if avatar_div:
+                classes = avatar_div.get("class", [])
+                if "online" in classes:
+                    result["status_code"] = 1
+                    result["status_text"] = "Online"
+                elif "offline" in classes:
+                    result["status_code"] = 0
+                    result["status_text"] = "Offline"
+
+        logger.debug(f"Steam profile parse result: {result}")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error parsing Steam profile: {e}")
+        return None
 
 
 def parse_steam_profile_images(profile_url: str):
@@ -143,8 +300,8 @@ def parse_steam_profile_images(profile_url: str):
             parent = picture.parent
 
             if parent and (
-                "profile_avatar_frame"
-                in parent.get("class", [])
+                    "profile_avatar_frame"
+                    in parent.get("class", [])
             ):
                 continue
 

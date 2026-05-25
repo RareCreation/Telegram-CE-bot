@@ -12,9 +12,10 @@ from utils.check_status_util import tracking_tasks, check_status
 from utils.constants import PHOTO
 from utils.logger_util import logger
 from utils.steam_api import resolve_vanity_url
-
+from utils.steam_parser import is_china_profile
 
 router = Router(name="online_check")
+
 
 def load(dp: Router) -> None:
     dp.include_router(router)
@@ -22,8 +23,69 @@ def load(dp: Router) -> None:
 
 def normalize_steam_url(url: str):
     url = url.strip().split("?")[0]
-    url = url.replace("steamchina.com", "steamcommunity.com")
+
+    
+    if "my.steamchina.com" in url:
+        
+        pass
+    elif "steamchina.com" in url:
+        
+        url = url.replace("steamchina.com", "my.steamchina.com")
+    elif "steamcommunity.com" in url:
+        
+        pass
+
     return url
+
+
+def extract_steam_id_from_url(url: str) -> str:
+
+    match_profile = re.search(r"steamcommunity\.com/profiles/(\d{17})", url)
+    if match_profile:
+        return match_profile.group(1)
+
+    
+    match_china_profile = re.search(r"my\.steamchina\.com/profiles/(\d{17})", url)
+    if match_china_profile:
+        return match_china_profile.group(1)
+
+    
+    match_any = re.search(r"(\d{17})", url)
+    if match_any:
+        return match_any.group(1)
+
+    return None
+
+
+async def resolve_steam_id(url: str) -> tuple:
+
+    url = normalize_steam_url(url)
+    steam_id = None
+
+    
+    match_vanity = re.fullmatch(r"https?://steamcommunity\.com/id/([a-zA-Z0-9_-]+)/?", url)
+    if match_vanity:
+        steam_id = await resolve_vanity_url(match_vanity.group(1))
+        if steam_id:
+            
+            url = f"https://steamcommunity.com/profiles/{steam_id}/"
+        return steam_id, url
+
+    
+    match_china_vanity = re.fullmatch(r"https?://my\.steamchina\.com/id/([a-zA-Z0-9_-]+)/?", url)
+    if match_china_vanity:
+        
+        
+        
+        steam_id = await resolve_vanity_url(match_china_vanity.group(1))
+        if steam_id:
+            url = f"https://my.steamchina.com/profiles/{steam_id}/"
+        return steam_id, url
+
+    
+    steam_id = extract_steam_id_from_url(url)
+
+    return steam_id, url
 
 
 @router.callback_query(F.data == "online_status")
@@ -50,34 +112,39 @@ async def on_online_status(callback: CallbackQuery, state: FSMContext):
 
 @router.message(OnlineCheckState.waiting_for_profile_link)
 async def handle_online_status_link(message: Message, state: FSMContext):
-    url = normalize_steam_url(message.text)
-    steam_id = None
+    raw_url = message.text.strip()
+    url = normalize_steam_url(raw_url)
 
-    match_profile = re.fullmatch(r"https?://steamcommunity\.com/profiles/(\d{17})/?", url)
-    if match_profile:
-        steam_id = match_profile.group(1)
+    
+    is_valid_steam_url = (
+            "steamcommunity.com" in url or
+            "my.steamchina.com" in url or
+            "steamchina.com" in url
+    )
 
-    match_vanity = re.fullmatch(r"https?://steamcommunity\.com/id/([a-zA-Z0-9_-]+)/?", url)
-    if match_vanity:
-        steam_id = await resolve_vanity_url(match_vanity.group(1))
-
-    if not steam_id:
-        match_any = re.search(r"(\d{17})", url)
-        if match_any:
-            steam_id = match_any.group(1)
-
-    if not steam_id:
-        await message.answer("❌ Неверная ссылка")
+    if not is_valid_steam_url:
+        await message.answer(
+            "❌ Неверная ссылка\n\nПожалуйста, отправьте ссылку на профиль Steam (steamcommunity.com или my.steamchina.com)")
         return
 
-    logger.info(f"Received link: {url}")
+    steam_id, normalized_url = await resolve_steam_id(url)
+
+    if not steam_id:
+        await message.answer(
+            "❌ Не удалось определить Steam ID\n\nПожалуйста, убедитесь что ссылка правильная и попробуйте снова")
+        return
+
+    logger.info(f"Received link: {raw_url}")
+    logger.info(f"Normalized url: {normalized_url}")
     logger.info(f"Resolved steam_id: {steam_id}")
+    logger.info(f"Is China profile: {is_china_profile(normalized_url)}")
 
     tg_id = message.from_user.id
 
     conn = sqlite3.connect("tracking.db")
     cursor = conn.cursor()
 
+    
     cursor.execute(
         "SELECT 1 FROM tracking WHERE tg_id = ? AND steam_id = ?",
         (tg_id, steam_id)
@@ -97,9 +164,12 @@ async def handle_online_status_link(message: Message, state: FSMContext):
 
         await message.answer("❌ Отслеживание остановлено")
         await state.clear()
+        conn.close()
         return
 
-    await state.update_data(steam_id=steam_id, url=url)
+    conn.close()
+
+    await state.update_data(steam_id=steam_id, url=normalized_url)
     await message.answer("💬 Напишите комментарий для этого профиля:")
     await state.set_state(OnlineCheckState.waiting_for_comment)
 
@@ -113,18 +183,29 @@ async def handle_profile_comment(message: Message, state: FSMContext):
     url = data["url"]
     tg_id = message.from_user.id
 
+    is_china = is_china_profile(url)
+    logger.info(f"Saving tracking for China profile: {is_china}")
+
     conn = sqlite3.connect("tracking.db")
     cursor = conn.cursor()
 
+    
+    try:
+        cursor.execute("ALTER TABLE tracking ADD COLUMN profile_url TEXT")
+    except sqlite3.OperationalError:
+        pass  
+
     cursor.execute(
-        "INSERT INTO tracking (tg_id, steam_id, comment, last_status) VALUES (?, ?, ?, ?)",
-        (tg_id, steam_id, comment, "offline")
+        "INSERT INTO tracking (tg_id, steam_id, comment, last_status, profile_url) VALUES (?, ?, ?, ?, ?)",
+        (tg_id, steam_id, comment, "offline", url)
     )
 
     conn.commit()
     conn.close()
-    logger.info(f"Saving tracking: tg_id={tg_id}, steam_id={steam_id}, comment={comment}")
-    task = asyncio.create_task(check_status(tg_id, steam_id, comment))
+
+    logger.info(f"Saving tracking: tg_id={tg_id}, steam_id={steam_id}, comment={comment}, url={url}")
+
+    task = asyncio.create_task(check_status(tg_id, steam_id, comment, url))
     tracking_tasks[(tg_id, steam_id)] = task
 
     await message.answer(f"✅ Начато отслеживание\n\n{url}\n💬 {comment}")

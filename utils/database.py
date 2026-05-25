@@ -5,27 +5,52 @@ def init_db():
     conn = sqlite3.connect('tracking.db')
     cursor = conn.cursor()
     cursor.execute('''
-    CREATE TABLE IF NOT EXISTS tracking (
-        tg_id INTEGER,
-        steam_id TEXT,
-        comment TEXT,
-        last_status TEXT,
-        PRIMARY KEY (tg_id, steam_id)
-    )
-    ''')
+                   CREATE TABLE IF NOT EXISTS tracking
+                   (
+                       tg_id
+                       INTEGER,
+                       steam_id
+                       TEXT,
+                       comment
+                       TEXT,
+                       last_status
+                       TEXT,
+                       profile_url
+                       TEXT,
+                       PRIMARY
+                       KEY
+                   (
+                       tg_id,
+                       steam_id
+                   )
+                       )
+                   ''')
+
+    
+    try:
+        cursor.execute("ALTER TABLE tracking ADD COLUMN profile_url TEXT")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
+
 
 def init_users_db():
     conn = sqlite3.connect('users.db')
     cursor = conn.cursor()
     cursor.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        tg_id INTEGER PRIMARY KEY
-    )
-    ''')
+                   CREATE TABLE IF NOT EXISTS users
+                   (
+                       tg_id
+                       INTEGER
+                       PRIMARY
+                       KEY
+                   )
+                   ''')
     conn.commit()
     conn.close()
+
 
 def add_user(tg_id: int):
     conn = sqlite3.connect('users.db')
@@ -36,6 +61,7 @@ def add_user(tg_id: int):
     conn.commit()
     conn.close()
 
+
 def get_user_count() -> int:
     conn = sqlite3.connect('users.db')
     cursor = conn.cursor()
@@ -44,13 +70,17 @@ def get_user_count() -> int:
     conn.close()
     return count
 
-def add_tracking(tg_id: int, steam_id: str, comment: str, last_status: str = "Currently Offline"):
+
+def add_tracking(tg_id: int, steam_id: str, comment: str, profile_url: str, last_status: str = "offline"):
     conn = sqlite3.connect('tracking.db')
     cursor = conn.cursor()
-    cursor.execute('INSERT INTO tracking (tg_id, steam_id, comment, last_status) VALUES (?, ?, ?, ?)',
-                   (tg_id, steam_id, comment, last_status))
+    cursor.execute(
+        'INSERT INTO tracking (tg_id, steam_id, comment, last_status, profile_url) VALUES (?, ?, ?, ?, ?)',
+        (tg_id, steam_id, comment, last_status, profile_url)
+    )
     conn.commit()
     conn.close()
+
 
 def remove_tracking(tg_id: int, steam_id: str) -> bool:
     conn = sqlite3.connect('tracking.db')
@@ -61,6 +91,7 @@ def remove_tracking(tg_id: int, steam_id: str) -> bool:
     conn.close()
     return affected > 0
 
+
 def get_tracking_count(tg_id: int) -> int:
     conn = sqlite3.connect('tracking.db')
     cursor = conn.cursor()
@@ -69,13 +100,15 @@ def get_tracking_count(tg_id: int) -> int:
     conn.close()
     return count
 
-def get_all_tracking() -> List[Tuple[int, str, str]]:
+
+def get_all_tracking() -> List[Tuple[int, str, str, str]]:
     conn = sqlite3.connect('tracking.db')
     cursor = conn.cursor()
-    cursor.execute('SELECT tg_id, steam_id, comment FROM tracking')
+    cursor.execute('SELECT tg_id, steam_id, comment, profile_url FROM tracking')
     rows = cursor.fetchall()
     conn.close()
     return rows
+
 
 def update_tracking_status(tg_id: int, steam_id: str, status: str):
     conn = sqlite3.connect('tracking.db')
@@ -85,6 +118,7 @@ def update_tracking_status(tg_id: int, steam_id: str, status: str):
     conn.commit()
     conn.close()
 
+
 def get_tracking_status(tg_id: int, steam_id: str) -> Optional[str]:
     conn = sqlite3.connect('tracking.db')
     cursor = conn.cursor()
@@ -92,6 +126,7 @@ def get_tracking_status(tg_id: int, steam_id: str) -> Optional[str]:
     row = cursor.fetchone()
     conn.close()
     return row[0] if row else None
+
 
 def check_tracking_exists(tg_id: int, steam_id: str) -> bool:
     conn = sqlite3.connect('tracking.db')
@@ -101,6 +136,7 @@ def check_tracking_exists(tg_id: int, steam_id: str) -> bool:
     conn.close()
     return exists
 
+
 def get_all_users() -> List[int]:
     conn = sqlite3.connect('users.db')
     cursor = conn.cursor()
@@ -108,3 +144,12 @@ def get_all_users() -> List[int]:
     users = [row[0] for row in cursor.fetchall()]
     conn.close()
     return users
+
+
+def get_tracking_by_tg_id(tg_id: int) -> List[Tuple[str, str, str]]:
+    conn = sqlite3.connect('tracking.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT steam_id, comment, profile_url FROM tracking WHERE tg_id = ?', (tg_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
