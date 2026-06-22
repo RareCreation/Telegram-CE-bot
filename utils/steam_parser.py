@@ -244,34 +244,38 @@ def parse_steam_profile_images(profile_url: str):
             "html.parser"
         )
 
-        
+        # Получаем имя пользователя
         persona_name = "Unknown"
         persona_name_el = soup.find("span", class_="actual_persona_name")
         if persona_name_el:
             persona_name = persona_name_el.get_text(strip=True)
 
-        
+        # Ищем avatar контейнер
         avatar_container = soup.find("div", class_="playerAvatarAutoSizeInner")
         avatar_url = None
         frame_url = None
 
         if avatar_container:
-            
+            # Ищем img внутри avatar_container
             img_tag = avatar_container.find("img")
             if img_tag:
                 src = img_tag.get("src")
                 if src:
-                    
-                    
+                    # Если src начинается с "images/", это относительный путь
+                    # Для steamcommunity.com нужно получить реальный URL через CDN
                     if src.startswith("images/"):
-                        
-                        
-                        base_url = "https://steamcommunity.com"
-                        avatar_url = f"{base_url}/{src}"
+                        # Извлекаем имя файла аватарки
+                        # Например: images/f746c0d6e8033718d34e8af29538f6f0cb1fc816_full.jpg
+                        filename = src.replace("images/", "")
+                        # Формируем URL для аватарки на CDN Steam
+                        # Используем hash из имени файла
+                        hash_part = filename.split("_")[0]
+                        # Полный URL для аватарки
+                        avatar_url = f"https://steamcdn-a.akamaihd.net/steamcommunity/public/images/avatars/{hash_part[:2]}/{filename}"
                     else:
                         avatar_url = resolve_image_url(src, profile_url)
 
-            
+            # Проверяем, есть ли рамка аватара (profile_avatar_frame)
             frame_block = avatar_container.find("div", class_="profile_avatar_frame")
             if frame_block:
                 picture = frame_block.find("picture")
@@ -284,9 +288,9 @@ def parse_steam_profile_images(profile_url: str):
                     if frame_src:
                         frame_url = resolve_image_url(frame_src, profile_url)
 
-        
+        # Если avatar_url все еще None, пробуем альтернативный способ поиска
         if not avatar_url:
-            
+            # Ищем avatar в разных местах
             avatar_div = soup.find("div", class_="playerAvatar")
             if avatar_div:
                 img_tag = avatar_div.find("img")
@@ -294,7 +298,9 @@ def parse_steam_profile_images(profile_url: str):
                     src = img_tag.get("src")
                     if src:
                         if src.startswith("images/"):
-                            avatar_url = f"https://steamcommunity.com/{src}"
+                            filename = src.replace("images/", "")
+                            hash_part = filename.split("_")[0]
+                            avatar_url = f"https://steamcdn-a.akamaihd.net/steamcommunity/public/images/avatars/{hash_part[:2]}/{filename}"
                         else:
                             avatar_url = resolve_image_url(src, profile_url)
 
