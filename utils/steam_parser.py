@@ -244,81 +244,59 @@ def parse_steam_profile_images(profile_url: str):
             "html.parser"
         )
 
-        avatar_container = soup.find(
-            "div",
-            class_="playerAvatarAutoSizeInner"
-        )
-
-        if not avatar_container:
-            logger.error(
-                "playerAvatarAutoSizeInner not found"
-            )
-            return None, None, None
-
+        
         persona_name = "Unknown"
-
-        persona_name_el = soup.find(
-            "span",
-            class_="actual_persona_name"
-        )
-
+        persona_name_el = soup.find("span", class_="actual_persona_name")
         if persona_name_el:
-            persona_name = persona_name_el.get_text(
-                strip=True
-            )
+            persona_name = persona_name_el.get_text(strip=True)
 
+        
+        avatar_container = soup.find("div", class_="playerAvatarAutoSizeInner")
+        avatar_url = None
         frame_url = None
 
-        frame_block = avatar_container.find(
-            "div",
-            class_="profile_avatar_frame"
-        )
+        if avatar_container:
+            
+            img_tag = avatar_container.find("img")
+            if img_tag:
+                src = img_tag.get("src")
+                if src:
+                    
+                    
+                    if src.startswith("images/"):
+                        
+                        
+                        base_url = "https://steamcommunity.com"
+                        avatar_url = f"{base_url}/{src}"
+                    else:
+                        avatar_url = resolve_image_url(src, profile_url)
 
-        if frame_block:
-            picture = frame_block.find("picture")
+            
+            frame_block = avatar_container.find("div", class_="profile_avatar_frame")
+            if frame_block:
+                picture = frame_block.find("picture")
+                if picture:
+                    img_tag = picture.find("img")
+                    frame_src = extract_image_url(img_tag)
+                    if not frame_src:
+                        source_tag = picture.find("source")
+                        frame_src = extract_image_url(source_tag)
+                    if frame_src:
+                        frame_url = resolve_image_url(frame_src, profile_url)
 
-            if picture:
-                img_tag = picture.find("img")
-
-                frame_src = extract_image_url(img_tag)
-
-                if not frame_src:
-                    source_tag = picture.find("source")
-                    frame_src = extract_image_url(source_tag)
-
-                if frame_src:
-                    frame_url = resolve_image_url(
-                        frame_src,
-                        profile_url
-                    )
-
-        avatar_url = None
-
-        pictures = avatar_container.find_all("picture")
-
-        for picture in pictures:
-            parent = picture.parent
-
-            if parent and (
-                    "profile_avatar_frame"
-                    in parent.get("class", [])
-            ):
-                continue
-
-            img_tag = picture.find("img")
-
-            avatar_src = extract_image_url(img_tag)
-
-            if not avatar_src:
-                source_tag = picture.find("source")
-                avatar_src = extract_image_url(source_tag)
-
-            if avatar_src:
-                avatar_url = resolve_image_url(
-                    avatar_src,
-                    profile_url
-                )
-                break
+        
+        if not avatar_url:
+            
+            avatar_div = soup.find("div", class_="playerAvatar")
+            if avatar_div:
+                img_tag = avatar_div.find("img")
+                if img_tag:
+                    src = img_tag.get("src")
+                    if src:
+                        if src.startswith("images/"):
+                            avatar_url = f"https://steamcommunity.com/{src}"
+                        else:
+                            avatar_url = resolve_image_url(src, profile_url)
 
         logger.debug(
             f"""
