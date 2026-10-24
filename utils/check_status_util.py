@@ -114,66 +114,78 @@ def get_status_text(state: int) -> tuple:
     else:
         return "🔴", "Мамонт вышел из сети"
 
-
 async def check_status(tg_id: int, steam_id: str, comment: str, profile_url: str):
     is_china = is_china_profile(profile_url)
+    task_id = id(asyncio.current_task())
+    task_key = (tg_id, steam_id)
     logger.info(
-        f"Started tracking {'CHINA' if is_china else 'STEAM'} profile: tg_id={tg_id} steam_id={steam_id} url={profile_url}")
+        f"Started tracking {'CHINA' if is_china else 'STEAM'} profile: "
+        f"tg_id={tg_id} steam_id={steam_id} url={profile_url} task_id={task_id}"
+    )
 
     while True:
         try:
             if not check_tracking_exists(tg_id, steam_id):
-                logger.info(f"Stopped tracking (DB removed) {steam_id}")
+                logger.info(f"Stopped tracking (DB removed) {steam_id} task_id={task_id}")
                 break
-
 
             state = await fetch_status(steam_id, profile_url)
 
             if state is None:
-                logger.warning(f"State is None for {steam_id}")
+                logger.warning(f"State is None for {steam_id} task_id={task_id}")
                 await asyncio.sleep(60)
                 continue
 
             simplified_status = map_status(state)
 
-
             db_last_status = get_tracking_status(tg_id, steam_id)
 
-
             profile_type = "CHINA" if is_china else "STEAM"
-            logger.info(f"[{profile_type}] {steam_id} state={state} -> {simplified_status} (last: {db_last_status})")
-
+            logger.info(
+                f"[{profile_type}] {steam_id} task_id={task_id} "
+                f"state={state} -> {simplified_status} (last: {db_last_status})"
+            )
 
             if db_last_status != simplified_status:
-                update_tracking_status(tg_id, steam_id, simplified_status)
+                affected = update_tracking_status(tg_id, steam_id, simplified_status)
+
+                if affected == 0:
+                    logger.warning(
+                        f"[{profile_type}] {steam_id} task_id={task_id} "
+                        f"UPDATE affected 0 rows (row missing?) — skip notification"
+                    )
+                    await asyncio.sleep(30)
+                    continue
 
                 emoji, status_text = get_status_text(state)
-
-
-                if state == 1:
-                    text = f"{emoji} {status_text}\n\n"
-                elif state in (2, 3, 4):
-                    text = f"{emoji} {status_text}\n\n"
-                else:
-                    text = f"{emoji} {status_text}\n\n"
-
+                text = f"{emoji} {status_text}\n\n"
                 text += f"💬 {comment}\n📎 {profile_url}"
 
-
-                await bot.send_message(tg_id, text)
-
-                logger.info(
-                    f"Status change sent to tg_id={tg_id} for {'CHINA' if is_china else 'STEAM'} profile {steam_id}")
-
+                try:
+                    await bot.send_message(tg_id, text)
+                    logger.info(
+                        f"[{profile_type}] {steam_id} task_id={task_id} "
+                        f"-> сообщение отправлено tg_id={tg_id} (status={simplified_status})"
+                    )
+                except Exception as send_err:
+                    logger.error(
+                        f"[{profile_type}] {steam_id} task_id={task_id} "
+                        f"-> ошибка отправки сообщения tg_id={tg_id}: {send_err}"
+                    )
+            else:
+                logger.debug(
+                    f"[{profile_type}] {steam_id} task_id={task_id} "
+                    f"-> статус не изменился ({simplified_status}), сообщение НЕ отправлено"
+                )
 
             sleep_interval = 45 if is_china else 30
             await asyncio.sleep(sleep_interval)
 
         except asyncio.CancelledError:
-            logger.info(f"Tracking cancelled for {steam_id}")
+            logger.info(f"Tracking cancelled for {steam_id} task_id={task_id}")
             break
         except Exception as e:
-            logger.error(f"check_status loop error {steam_id}: {e}")
+            logger.error(f"check_status loop error {steam_id} task_id={task_id}: {e}")
             await asyncio.sleep(10)
 
 
